@@ -93,7 +93,7 @@ from googleapiclient.errors import HttpError
 from importer.load_and_process import FileEmbedder
 from app.config import EMBEDDING_MODEL
 from app.embeddings_manager import get_embedding_from_manager, get_session_vector_store, reset_embeddings_storage, reset_session_vector_store, set_current_session_id, store_embedding, PGVectorWithEmbeddings, store_driver, store_window_handler, reset_driver, reset_window_handlers
-from app.rag_chain import final_chain, random_base36_string, copy_driver_session
+from app.rag_chain import final_chain, web_scraping_chain, random_base36_string, copy_driver_session
 
 app = FastAPI()
 
@@ -140,149 +140,6 @@ async def service_worker_js():
     # file_path = os.path.join("../frontend/public/service-worker-popup.js")
     file_path = './app/service-worker-popup.js'
     return FileResponse(file_path, media_type="application/javascript")
-
-def retrieve_top_20_attractions(session_id: str, attraction_embeddings: List[List[float]], preprocessing_results):
-    # Convert the list into a dictionary, preprocessing_results must never be empty
-    jsonname_to_profile_dict = {list(item['result'].keys())[0]: list(item['result'].values())[0] for item in preprocessing_results}
-    
-    pgvectorstore = get_session_vector_store(session_id)
-    session_vector_store = PGVectorWithEmbeddings(pgvectorstore)
-    profile_embeddings: {str : List[List[float]]} = {}
-    
-    # To prevent repeats
-    unique_profiles = []
-    seen_paths = set()
-    extracted = False
-    
-    for attraction_embedding in attraction_embeddings:
-        if extracted:
-            break
-        
-        # Perform similarity search
-        results = session_vector_store.similarity_search_with_score_by_vector(job_posting_embedding, k=3)
-        
-        for doc, embedding, _ in results:
-            # print(f"doc: {doc}")
-            path = doc.metadata['source']
-            basename = os.path.basename(path) # profile pdf basename
-            # Fetch profile object from dict using basename
-            profile = pdfname_to_profile_dict.get(basename)
-            # Fetch id of profile
-            id = profile['id']
-            
-            if path not in seen_paths:
-                # append profile to unique profiles
-                unique_profiles.append(profile)
-                seen_paths.add(path)
-            if len(unique_profiles) >= 21:
-                extracted = True
-                break
-            
-            if id not in profile_embeddings:
-                profile_embeddings[id] = []
-            profile_embeddings[id].append(embedding.tolist())
-            
-    profile_embeddings_data_file = f"./database/profile_embeddings_{session_id}.json"
-    with open(profile_embeddings_data_file, "w", encoding="utf-8") as f:
-        json.dump(profile_embeddings, f)
-        
-    # Reset global session vector store and embeddings storage
-    reset_session_vector_store(session_id=session_id)
-    reset_embeddings_storage()
-    
-    if extracted:
-        print("broken in the middle")
-        return unique_profiles[:-1]
-    
-    print(f"number of extracted unique profiles: {len(unique_profiles)}")
-    return unique_profiles
-
-# executor = ThreadPoolExecutor(max_workers=1)
-# @app.post("/start-networking")
-# async def start_networking(request: Request):
-#     request_json = await request.json()
-#     print(f"start networking request json: {request_json}")
-#     job_id = request_json['input']['id']
-#     type = request_json['input']['type']
-    
-#     job_posting_embedding, profile_data = get_job_data(job_id)
-    
-#     initial_inputs = [
-#         {
-#             "instruction": "Extract relevant profile keywords given your context",
-#             "url": profile.get("url"),
-#             "image_path": profile.get("image_path"),
-#             "name": profile.get("name"),
-#             "id": random_base36_string(),
-#             "type": type,
-#             "session_id": job_id
-#         }
-#         for profile in profile_data[1::2]
-#     ]
-    
-#     async def create_task(input_data):
-#         return await profile_preprocessing_chain.ainvoke(input_data)
-    
-#     def chunk_list(lst, n):
-#         for i in range(0, len(lst), n):
-#             yield lst[i:i + n]
-    
-#     num_chunks = 2
-#     chunk_size = (len(initial_inputs) + num_chunks - 1) // num_chunks
-#     input_chunks = list(chunk_list(initial_inputs, chunk_size))
-    
-#     async def event_generator():
-#         preprocessing_results = []
-#         retrieved_profiles = []
-        
-#         try:
-#             for input_chunk in input_chunks:
-#                 tasks = [create_task(input_data) for input_data in input_chunk]
-#                 semi_global_driver = copy_driver_session(escalator_global.scraper.driver)
-#                 close_all_windows(semi_global_driver)
-#                 await asyncio.sleep(1)
-                
-#                 urls = []
-#                 counter = 0
-#                 for i, input_data in enumerate(input_chunk):
-#                     if counter % 4 == 0:
-#                         await asyncio.sleep(3)
-#                     semi_global_driver.execute_cdp_cmd("Target.createTarget", {"url": input_data['url'], "newWindow": False})
-#                     urls.append(input_data['url'])
-#                     await asyncio.sleep(2)
-#                     store_window_handler(unique_id=input_data['url'], window_handler=semi_global_driver.window_handles[i + 1])
-#                     counter += 1
-
-#                 await asyncio.sleep(3)
-#                 store_driver(unique_id=job_id, driver=semi_global_driver)
-                
-#                 # chunk_results = await asyncio.gather(*tasks)
-#                 # Run await asyncio.gather(*tasks) in a separate thread
-#                 loop = asyncio.get_event_loop()
-#                 chunk_results = await loop.run_in_executor(executor, lambda: asyncio.run(asyncio.gather(*tasks)))
-                
-#                 semi_global_driver.quit()
-#                 reset_driver()
-#                 reset_window_handlers()
-                
-#                 preprocessing_results.extend(chunk_results)
-                
-#             retrieved_profiles = retrieve_top20_profiles(session_id=job_id, job_posting_embeddings=job_posting_embedding, preprocessing_results=preprocessing_results)
-#             unique_profiles_dict = {list(profile.values())[0]: profile for profile in retrieved_profiles}
-#             profile_data_file = f"./database/profiles_{job_id}.json"
-#             with open(profile_data_file, "w", encoding="utf-8") as f:
-#                 json.dump(unique_profiles_dict, f)
-            
-#             yield json.dumps({"event": "data", "id": job_id, "status": "completed", "profiles": retrieved_profiles})
-            
-#         except Exception as e:
-#             raise f"An error occured while networking for {job_id}: {e}"
-        
-#         finally:
-#             # print(f"finally filtered: {retrieved_profiles}")
-#             pass
-
-#     return EventSourceResponse(event_generator(), media_type="text/event-stream") # media_type="text/event-stream"
 ###
 
 # Mapping from file extensions to Language enumeration values
@@ -366,12 +223,11 @@ async def submit_url(url: str = Form(...)):
     return JSONResponse(content={"url": url})
 
 add_routes(app, final_chain, path="/rag") # Main
+add_routes(app, web_scraping_chain, path="/scrape")
 
 # add_routes(app, preprocess_chain, path="/preprocess")
 
 # add_routes(app, research_chain, path="/research")
-
-# add_routes(app, web_scraping_chain, path="/scrape")
 
 if __name__ == "__main__":
     import uvicorn

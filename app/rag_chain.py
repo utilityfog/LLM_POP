@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 import json
 import random
 import re
@@ -11,6 +13,7 @@ from bs4 import BeautifulSoup
 import requests
 import undetected_chromedriver as uc
 import aiofiles
+import asyncio
 
 from operator import itemgetter
 from typing import Any, Dict, List, Optional, Tuple, TypedDict, Union
@@ -57,11 +60,20 @@ from selenium import webdriver
 
 from pyvirtualdisplay import Display
 
+from fastapi import FastAPI, File, Header, UploadFile, Form, HTTPException, Request, Depends, Cookie, APIRouter, BackgroundTasks
+
+try:
+    from sse_starlette import EventSourceResponse
+except ImportError:
+    EventSourceResponse = Any
+
 from app.embeddings_manager import get_current_session_id, get_embedding_from_manager, get_embeddings_storage, get_persistent_vector_store, get_session_vector_store, EMBEDDINGS_STORAGE, reset_embeddings_storage, reset_session_vector_store, set_current_session_id, get_driver
 from app.config import PG_COLLECTION_NAME, EMBEDDING_MODEL
 
-from importer.load_and_process import chatgpt_base
-from importer.load_and_process import FileEmbedder
+from importer.load_and_process import chatgpt_base, FileEmbedder
+from app.embeddings_manager import get_embedding_from_manager, get_session_vector_store, reset_embeddings_storage, reset_session_vector_store, set_current_session_id, store_embedding, PGVectorWithEmbeddings, store_driver, store_window_handler, reset_driver, reset_window_handlers
+from app.Automation import Automator
+from app.ExtractorClasses import Extractor
 
 load_dotenv()
 
@@ -171,57 +183,13 @@ Question from:
 {question}
 """
 
-SOLVE_TEMPLATE = """
-Answer given the following:
+ARGUMENT_SCRAPING_TEMPLATE = """
+Extract relevant Tourpedia API arguments from the input user prompt given the following:
 
-Current problem: 
-{problem}
-
-Total problems: 
-{persistent_cell_context}
-
-Solved problems: 
-{previous_cell_context}
-
-Write all math symbols in latex such that they can be executed in a Jupyter Notebook
-"""
-
-PREPROCESSING_TEMPLATE = """
-Extract a full list of problems that need to be solved from the augment:
-
-Uploaded file augment: 
-{augment}
-
-Retrieved context: 
-{context}
-
-Question from: 
-{question}
-
-Note:
-- If a single Jupyter notebook contains the problems that need to be solved, extract all relevant problems from the notebook.
-- If dealing with a PDF with a comprehensive list of problems AND a PDF that lists the problems that need to be solved is NOT uploaded, extract all relevant problems from the PDF with a comprehensive list of problems.
-- If a PDF that points to another document for problems is uploaded, identify and extract ONLY the relevant problems from the referred document.
-
-Each problem requires a label for both the problem number it is part of and sub problem it is part of.
-"""
-
-RESEARCH_TEMPLATE = """
-Explain academic papers given the following:
-
-Retrieved context:
-{context}
-
-Problem from: {question}
-"""
-
-WEB_SCRAPING_TEMPLATE = """
-Extract relevant Linkedin API search tags from the given job posting page given the following:
-
-Detailed Prompt: 
+Detailed Prompt:
 {instruction}
 
-Vector Embedded Job Posting Page: 
+Documentized Prompt Text:
 {context}
 
 File Embedding Keys:
@@ -230,19 +198,29 @@ File Embedding Keys:
 ID:
 {id}
 
-Return the extracted search tags as arguments to a function call
+Return the extracted API arguments as parameters to a function call
 """
 
-PROFILE_SCRAPING_TEMPLATE = """
-Extract relevant profile keywords from the given profile page given the following:
+LOCATION_GENERATION_TEMPLATE = """
+Extract relevant location properties from the given location review given the following:
 
 Detailed Prompt: 
 {instruction}
 
-Vector Embedded Profile Page: 
+Vector Embedded Location Review: 
 {context}
 
-Return the extracted keywords as arguments to a function call
+Return the extracted properties as arguments to a function call
+"""
+
+LOCATION_GUIDE_TEMPLATE = """
+Provide a friendly guide of locations a user would like to visit based on the given location reviews corresponding to the prompt, given the following:
+
+Detailed Prompt: 
+{instruction}
+
+Vector Embedded Location Reviews for Locations related to the prompt: 
+{context}
 """
 ###
 
@@ -260,6 +238,8 @@ def template_processor(embeddings_storage, template):
 
 ### LLMs
 llm_conversation = chatgpt_base
+llm_tourpedia_api_arguments_extractor = ChatOpenAI(temperature=0.3, model='gpt-3.5-turbo-0125', max_tokens=4096, streaming=True, tools=Extractor.extract_relevant_api_arguments, tool_choice={"type": "function", "function": {"name": "extract_relevant_api_arguments"}})
+llm_tourpedia_location_object_generator = ChatOpenAI(temperature=0.3, model='gpt-3.5-turbo-0125', max_tokens=4096, streaming=True, tools=Extractor.extract_relevant_location_properties, tool_choice={"type": "function", "function": {"name": "extract_relevant_location_properties"}})
 ###
 
 print(f"max_tokens: {llm_conversation.max_tokens}")
@@ -413,6 +393,17 @@ def get_question(inputs):
     fetch_context = inputs['fetchContext']
     
     return question # Return type must be str to be able to pipe to retrieve_context_from_question
+
+def get_question_and_return_as(inputs):
+    """Method to get question"""
+    # Get user question
+    question: str = inputs['question']
+    
+    # Get whether or not to fetch context
+    global fetch_context
+    fetch_context = inputs['fetchContext']
+    
+    return question # Return type must be str to be able to pipe to retrieve_context_from_question
     
 def retrieve_context_from_question(question):
     """Method to retrieve context from question"""
@@ -431,6 +422,134 @@ def get_context_and_trace(dictionary, key):
     print(f"context length: {len(str(context))}")
     # trimmed_print("fucking context", context, 10000)
     return context
+
+def get_prompt_data(prompt_id):
+    # Paths to the JSON files
+    prompt_file = f"./database/prompt_{prompt_id}.json"
+    locations_file = f"./database/locations_{prompt_id}.json"
+    
+    # Read and parse the job posting embeddings
+    with open(prompt_file, "r", encoding="utf-8") as f:
+        prompt_dict = json.load(f)
+    
+    # Read and parse the job URLs
+    with open(locations_file, "r", encoding="utf-8") as f:
+        locations_dict = json.load(f)
+    
+    # Retrieve the embeddings and URLs using job_id
+    prompt_embedding = prompt_dict.get(prompt_id)
+    location_list = locations_dict.get(prompt_id) # list of dicts where each dict is a location object
+
+    # Return the tuple of job_posting_embedding and profile_urls
+    return prompt_embedding, location_list
+
+def retrieve_top_20_attractions(session_id: str, user_prompt_embeddings: List[List[float]], preprocessing_results):
+    # Convert the list into a dictionary, preprocessing_results must never be empty
+    jsonname_to_location_dict = {list(item['result'].keys())[0]: list(item['result'].values())[0] for item in preprocessing_results}
+    
+    pgvectorstore = get_session_vector_store(session_id)
+    session_vector_store = PGVectorWithEmbeddings(pgvectorstore)
+    location_embeddings: {str : List[List[float]]} = {}
+    
+    # To prevent repeats
+    unique_profiles = []
+    seen_paths = set()
+    extracted = False
+    
+    for user_prompt_embedding in user_prompt_embeddings:
+        if extracted:
+            break
+        
+        # Perform similarity search
+        results = session_vector_store.similarity_search_with_score_by_vector(user_prompt_embedding, k=3)
+        
+        for doc, embedding, _ in results:
+            # print(f"doc: {doc}")
+            path = doc.metadata['source']
+            basename = os.path.basename(path) # profile pdf basename
+            # Fetch profile object from dict using basename
+            location = jsonname_to_location_dict.get(basename)
+            # Fetch id of profile
+            id = location['id']
+            
+            if path not in seen_paths:
+                # append profile to unique profiles
+                unique_profiles.append(location)
+                seen_paths.add(path)
+            if len(unique_profiles) >= 21:
+                extracted = True
+                break
+            
+            if id not in location_embeddings:
+                location_embeddings[id] = []
+            location_embeddings[id].append(embedding.tolist())
+            
+    location_embeddings_data_file = f"./database/location_embeddings_{session_id}.json"
+    with open(location_embeddings_data_file, "w", encoding="utf-8") as f:
+        json.dump(location_embeddings, f)
+        
+    # Reset global session vector store and embeddings storage
+    reset_session_vector_store(session_id=session_id)
+    reset_embeddings_storage()
+    
+    if extracted:
+        print("broken in the middle")
+        return unique_profiles[:-1]
+    
+    print(f"number of extracted unique profiles: {len(unique_profiles)}")
+    return unique_profiles
+
+executor = ThreadPoolExecutor(max_workers=1)
+async def start_extracting(inputs):
+    prompt_id = inputs['id']
+    type = inputs['type']
+    prompt_embedding, raw_location_list = get_prompt_data(prompt_id)
+    
+    initial_inputs = [
+        {
+            "instruction": "Extract relevant location properties given your context",
+            "review": location.value(),
+            "id": location.key(),
+            "type": type,
+            "session_id": prompt_id
+        }
+        for location in raw_location_list[1::2]
+    ]
+    
+    async def create_task(input_data):
+        return await location_generation_chain.ainvoke(input_data)
+    
+    def chunk_list(lst, n):
+        for i in range(0, len(lst), n):
+            yield lst[i:i + n]
+    
+    num_chunks = 2
+    chunk_size = (len(initial_inputs) + num_chunks - 1) // num_chunks
+    input_chunks = list(chunk_list(initial_inputs, chunk_size))
+    
+    async def event_generator():
+        preprocessing_results = []
+        retrieved_attractions = []
+        
+        try:
+            for input_chunk in input_chunks:
+                tasks = [create_task(input_data) for input_data in input_chunk]                
+                loop = asyncio.get_event_loop()
+                chunk_results = await loop.run_in_executor(executor, lambda: asyncio.run(asyncio.gather(*tasks)))
+                preprocessing_results.extend(chunk_results)
+                
+            retrieved_attractions = retrieve_top_20_attractions(session_id=prompt_id, user_prompt_embeddings=prompt_embedding, preprocessing_results=preprocessing_results)
+            unique_profiles_dict = {list(profile.values())[0]: profile for profile in retrieved_attractions}
+            attraction_data_file = f"./database/attractions_{prompt_id}.json"
+            with open(attraction_data_file, "w", encoding="utf-8") as f:
+                json.dump(unique_profiles_dict, f)
+            
+            yield json.dumps({"event": "data", "id": prompt_id, "status": "completed", "profiles": retrieved_attractions})
+            
+        except Exception as e:
+            raise f"An error occured while processing prompt {prompt_id}: {e}"
+
+    return EventSourceResponse(event_generator(), media_type="text/event-stream") # media_type="text/event-stream"
 
 def redirect_test(dictionary, key):
     # Print the stack trace when this function is called
@@ -706,6 +825,17 @@ class ProfileRetrievalInput(TypedDict, total=False):
     id: str
     url: str
     
+def convert_embeddings_to_docs(embeddings_list: List[List[List[float]]], session_vector_store):
+    print(f"convert_pdf_embeddings_to_docs called! with session vector store: {session_vector_store}")
+    extractor = Extractor()
+    documents: List[List[Document]] = []
+    
+    for embeddings in embeddings_list:
+        if embeddings is not None:
+            documents.extend(extractor.convert_embeddings_to_documents(embeddings, session_vector_store))
+        
+    return documents
+    
 # Function to copy the driver session
 # def copy_driver_session(original_driver: webdriver.chrome.webdriver.WebDriver) -> webdriver.chrome.webdriver.WebDriver:
 #     options = uc.ChromeOptions()
@@ -843,26 +973,23 @@ def copy_driver_session(original_driver: uc.Chrome) -> uc.Chrome:
 #         print(f"An error occurred: {error}")
 #     print("\n----------------------------------------\n")
 
-async def embed_website(inputs):
+async def embed_content(inputs): # Embeds either user prompt or saved txt objects of location JSON
     """Extension of run_google_searches to download PDFs and embed them."""
-    print(f"embed_website inputs: {inputs}")
+    print(f"embed_content inputs: {inputs}")
     embedding_method = OpenAIEmbeddings(model=EMBEDDING_MODEL, disallowed_special=(), show_progress_bar=True, chunk_size=100, skip_empty=True)
     
-    id = inputs['id'] # job_id or profile_id
-    image_path = ""
-    name = ""
-    url = inputs['url']
+    id = inputs['id'] # prompt_id or location_id, when its value is used, it is always location_id
+    prompt = inputs['question']
+    review = inputs['review']
     type = inputs['type']
-    if type == "job":
-        session_id = random_base36_string()
+    if type == "extraction":
+        session_id = random_base36_string() # initialization of user_prompt_id
         set_current_session_id(session_id)
         file_embedder = FileEmbedder(session_id)
-    elif type == "profile":
-        session_id = inputs['session_id'] # job_id
+    elif type == "generation":
+        session_id = inputs['session_id'] # same as user_prompt_id
         print(f"profile session_id: {session_id}")
         file_embedder = FileEmbedder(session_id, pre_delete_collection=False)
-        image_path = inputs['image_path']
-        name = inputs['name']
     
     ### Initialize text splitter
     text_splitter = SemanticChunker(embeddings=embedding_method)
@@ -870,35 +997,42 @@ async def embed_website(inputs):
     try:
         embeddings_list = []
         
-        ### Use unique id which was generated from React side which will be used to fetch embeddings for url
+        ### Use unique id which was generated from React side
         unique_id = id
         upload_folder = Path("./uploaded_files")
         
         ### Vector Embedding
         # Embed website to session vector store
-        file_extension = "html"
+        file_extension = "txt"
         file_embedding = None
+        
+        # Save User Prompt: str as txt to prompt_file_path
+        prompt_file_path = None
+        
+        # Save Review: Dict as txt to review_file_path
+        review_file_path = None
+        
         try:
             glob_pattern = f"**/*.{file_extension}"
-            if type == "job":
-                file_embedding = await file_embedder.process_and_embed_file(directory_path=upload_folder, file_path=None, unique_id=unique_id, url=url, embeddings=embedding_method, glob_pattern=glob_pattern, text_splitter=text_splitter)
-            elif type == "profile":
+            if type == "extraction":
+                file_embedding = await file_embedder.process_and_embed_file(directory_path=upload_folder, file_path=prompt_file_path, unique_id=unique_id, url=None, embeddings=embedding_method, glob_pattern=glob_pattern, text_splitter=text_splitter) # unique_id here is randomized prompt_id
+            elif type == "generation":
                 new_driver = get_driver(session_id)
                 # print(f"fetched driver: {new_driver}")
-                file_embedding = await file_embedder.process_and_embed_file(driver=new_driver, directory_path=upload_folder, file_path=image_path, unique_id=unique_id, url=url, embeddings=embedding_method, glob_pattern=glob_pattern, text_splitter=text_splitter, name=name)
+                file_embedding = await file_embedder.process_and_embed_file(driver=new_driver, directory_path=upload_folder, file_path=review_file_path, unique_id=unique_id, url=None, embeddings=embedding_method, glob_pattern=glob_pattern, text_splitter=text_splitter, name=None) # unique_id here is extracted location_id
         except Exception as e:
-            raise f"Error processing url {url}: {e}"
+            raise f"Error processing content: {e}"
         
         # Append to embeddings
         embeddings_list.append(file_embedding)
         
-        # IFF type == job
-        if type == "job":
+        # IFF type == extraction
+        if type == "extraction":
             # Save the dictionary that uses unique_id as key and embeddings_list as value as json to system to mimic persistence
-            job_data_file = f"./database/job_postings_{unique_id}.json"
-            job_page_dict = {unique_id: file_embedding}
-            async with aiofiles.open(job_data_file, "w", encoding="utf-8") as f:
-                await f.write(json.dumps(job_page_dict))
+            prompt_data_file = f"./database/prompt_{unique_id}.json"
+            prompt_dict = {unique_id: file_embedding}
+            async with aiofiles.open(prompt_data_file, "w", encoding="utf-8") as f:
+                await f.write(json.dumps(prompt_dict))
         
         # Return PDF embeddings_list: List[List[List[float]]] and session vector store for entire research session
         return {"embeddings_list": embeddings_list, "session_vector_store": get_session_vector_store(session_id, False)}
@@ -975,19 +1109,17 @@ class WrappedResponse:
 
 def generate_prompt(pipeline_data, type):
     # Select the appropriate template based on the type
-    if type == "job":
-        template = WEB_SCRAPING_TEMPLATE
-    elif type == "profile":
-        template = PROFILE_SCRAPING_TEMPLATE
+    if type == "extraction":
+        template = ARGUMENT_SCRAPING_TEMPLATE
+    elif type == "generation":
+        template = LOCATION_GENERATION_TEMPLATE
     else:
-        raise ValueError("Invalid type. Must be either 'job' or 'profile'.")
-
-    # print(f"chosen template: {template}")
+        raise ValueError("Invalid type. Must be either 'extraction' or 'generation'.")
     
     prompt_template = ChatPromptTemplate.from_template(template=template)
     prompt_output = prompt_template.format(**pipeline_data)
-    if type == "profile":
-        print(f"pipeline data for profile: {pipeline_data}")
+    if type == "generation":
+        print(f"pipeline data for location: {pipeline_data}")
     # Wrap the prompt output in the expected message format
     human_message = HumanMessage(content=prompt_output)
     print("Generate Prompt Successful!")
@@ -996,78 +1128,103 @@ def generate_prompt(pipeline_data, type):
         "context": pipeline_data,  # Preserve the original context
         "type": type
     }
-
-# escalator_global = Escalator()
-# def call_populated_function(wrapped_response):
-#     llm_response = wrapped_response.llm_response
-#     additional_data = wrapped_response.additional_data
     
-#     try:
-#         additional_kwargs = llm_response.additional_kwargs if hasattr(llm_response, 'additional_kwargs') else {}
-#         tool_calls = additional_kwargs.get('tool_calls', [])
-#         if tool_calls:
-#             tool_call = tool_calls[0]
-#             if tool_call['function']['name'] == "extract_relevant_search_tags":
-#                 arguments = json.loads(tool_call['function']['arguments'])
-#                 location = arguments["location"]
-#                 current_company = arguments["current_company"]
-#                 title = arguments["title"]
-#                 team = arguments["team"]
-#                 linkedin_search_tags = escalator_global.extract_relevant_search_tags(
-#                     id=additional_data['id'], location=location, current_company=current_company, title=title, team=team
-#                 )
-#                 additional_data['linkedin_search_tags'] = linkedin_search_tags
-                
-#                 return linkedin_search_tags
-#             elif tool_call['function']['name'] == "extract_relevant_profile_keywords":
-#                 escalator = Escalator()
-#                 arguments = json.loads(tool_call['function']['arguments'])
-#                 print(f"arguments for extract_relevant_profile_keywords: {arguments}, url: {additional_data['url']}, image path: {additional_data['image_path']}")
-#                 name = arguments["name"]
-#                 current_company = arguments["current_company"]
-#                 title = arguments["title"]
-#                 team = arguments["team"]
-#                 most_recent_school = arguments["most_recent_school"]
-#                 undergraduate_school = arguments["undergraduate_school"]
-#                 total_years_employed = arguments["total_years_employed"]
-                
-#                 profile_keywords = escalator.extract_relevant_profile_keywords(
-#                     url=additional_data['url'], image_path=additional_data['image_path'], id=additional_data['id'], name=name, current_company=current_company, title=title, team=team, most_recent_school=most_recent_school, undergraduate_school=undergraduate_school, total_years_employed=total_years_employed
-#                 )
-#                 additional_data['profile_keywords'] = profile_keywords
-                
-#                 return profile_keywords
-#         return wrapped_response
-#     except Exception as e:
-#         print(f"An error occurred in call_populated_function: {e}")
-#         return None
-
-def wrap_prompt_and_llm(pipeline_data, llm_model):
-    print(f"pipeline data: {pipeline_data}")
-    # Extract the context before invoking the template
-    context = {
-        "id": pipeline_data["id"],
-        "instruction": pipeline_data["instruction"],
-        "file_embedding_keys": pipeline_data["file_embedding_keys"],
-        "context": pipeline_data["context"]
-    }
-
-    # Invoke the ChatPromptTemplate
-    prompt_output = (pipeline_data)
-
-    # Prepare the input for the LLM with the prompt output
-    # llm_input = {
-    #     "messages": prompt_output,
-    #     "context": context
-    # }
-
-    # Invoke the LLM
-    print(f"What the fuck?: {ChatPromptTemplate.from_template(template=WEB_SCRAPING_TEMPLATE)}")
-    llm_response = ChatPromptTemplate.from_template(template=WEB_SCRAPING_TEMPLATE) | llm_model(pipeline_data)
-
-    # Wrap the response with the original context
+def call_llm_with_context(prompt_data):
+    # Select the appropriate LLM based on the type
+    model_type = "llm_tourpedia_api_arguments_extractor"
+    if prompt_data['type'] == "extraction":
+        llm_model = llm_tourpedia_api_arguments_extractor
+    elif prompt_data['type'] == "generation":
+        llm_model = llm_tourpedia_location_object_generator
+        model_type = "llm_tourpedia_location_object_generator"
+    else:
+        raise ValueError("Invalid type. Must be either 'extraction' or 'generation'.")
+    print(f"Successfully chose llm_model in call_llm_with_context: {model_type}")
+    # print(f"chosen llm_model: {llm_model.__str__()}")
+    llm_input = prompt_data["prompt_output"]
+    # print(f"llm input: {llm_input}")
+    # print(f"typeof llm input: {type(llm_input)}")
+    context = prompt_data["context"]
+    llm_response = llm_model(llm_input)
+    print(f"Successfully received llm_response in call_llm_with_context! {llm_response}")
     wrapped_response = WrappedResponse(llm_response=llm_response, additional_data=context)
     return wrapped_response
+
+extractor_global = Extractor()
+def call_populated_function(wrapped_response):
+    llm_response = wrapped_response.llm_response
+    additional_data = wrapped_response.additional_data
+    
+    try:
+        additional_kwargs = llm_response.additional_kwargs if hasattr(llm_response, 'additional_kwargs') else {}
+        tool_calls = additional_kwargs.get('tool_calls', [])
+        if tool_calls:
+            tool_call = tool_calls[0]
+            if tool_call['function']['name'] == "extract_relevant_api_arguments":
+                arguments = json.loads(tool_call['function']['arguments'])
+                location = arguments["location"]
+                category = arguments["category"]
+                tourpedia_api_arguments = extractor_global.extract_relevant_api_arguments(
+                    id=additional_data['id'], location=location, category=category
+                )
+                additional_data['tourpedia_api_arguments'] = tourpedia_api_arguments
+                
+                return tourpedia_api_arguments
+            elif tool_call['function']['name'] == "extract_relevant_location_properties":
+                extractor = Extractor()
+                arguments = json.loads(tool_call['function']['arguments'])
+                print(f"arguments for t: {arguments}, url: {additional_data['url']}, image path: {additional_data['image_path']}")
+                name = arguments["name"]
+                current_company = arguments["current_company"]
+                title = arguments["title"]
+                team = arguments["team"]
+                most_recent_school = arguments["most_recent_school"]
+                undergraduate_school = arguments["undergraduate_school"]
+                total_years_employed = arguments["total_years_employed"]
+                
+                location_properties = extractor.extract_relevant_location_properties(
+                    url=additional_data['url'], image_path=additional_data['image_path'], id=additional_data['id'], name=name, current_company=current_company, title=title, team=team, most_recent_school=most_recent_school, undergraduate_school=undergraduate_school, total_years_employed=total_years_employed
+                )
+                additional_data['location_properties'] = location_properties
+                
+                return location_properties
+        return wrapped_response
+    except Exception as e:
+        print(f"An error occurred in call_populated_function: {e}")
+        return None
+    
+def return_raw_location_list(inputs):
+    # Douglass's Function
+    print()
+    
+    
+
+# def wrap_prompt_and_llm(pipeline_data, llm_model):
+#     print(f"pipeline data: {pipeline_data}")
+#     # Extract the context before invoking the template
+#     context = {
+#         "id": pipeline_data["id"],
+#         "instruction": pipeline_data["instruction"],
+#         "file_embedding_keys": pipeline_data["file_embedding_keys"],
+#         "context": pipeline_data["context"]
+#     }
+
+#     # Invoke the ChatPromptTemplate
+#     prompt_output = (pipeline_data)
+
+#     # Prepare the input for the LLM with the prompt output
+#     # llm_input = {
+#     #     "messages": prompt_output,
+#     #     "context": context
+#     # }
+
+#     # Invoke the LLM
+#     print(f"What the fuck?: {ChatPromptTemplate.from_template(template=ARGUMENT_SCRAPING_TEMPLATE)}")
+#     llm_response = ChatPromptTemplate.from_template(template=ARGUMENT_SCRAPING_TEMPLATE) | llm_model(pipeline_data)
+
+#     # Wrap the response with the original context
+#     wrapped_response = WrappedResponse(llm_response=llm_response, additional_data=context)
+#     return wrapped_response
 ###
 
 # Correctly setting up partial functions
@@ -1107,74 +1264,56 @@ process_response_runnable = partial(process_response, key='response')
 # ).with_types(input_type=RagInput)
 
 fetch_context = partial(fetch_context_document_with_score)
-# Google Research
-# run_searches_and_embed_results = partial(run_google_searches_and_embed_pdfs)
-# return_converted_docs = RunnableLambda(lambda run_searches_and_embed_results_output: convert_embeddings_to_docs(**run_searches_and_embed_results_output)) # Expects embeddings_list and session_vector_store as arguments
+return_review_embeddings = partial(embed_content)
+return_converted_docs = RunnableLambda(lambda data: convert_embeddings_to_docs(**data))
 
-# Chain for returning to the user three most relevant academic paper given their query and explaining what they are about
-# research_chain = (
-#     RunnableParallel(
-#         # subchain that normally returns context but returns top 3 pdfs if they exist
-#         context=(run_searches_and_embed_results | return_converted_docs),
-#         question=itemgetter("question"),
-#         file_embedding_keys=itemgetter("file_embedding_keys") # Optional, but needs to be here in order for augment_context_with_file_embeddings to reset session vector store
-#     ) |
-#     RunnableParallel(
-#         answer=(ChatPromptTemplate.from_template(template=RESEARCH_TEMPLATE) | llm_conversation),
-#         augment = lambda inputs: augment_context_with_file_embeddings(inputs["context"], inputs["file_embedding_keys"]),
-#     )
-# ).with_types(input_type=RagInput)
+generate_prompt_runnable = RunnableLambda(lambda pipeline_data: generate_prompt(pipeline_data, pipeline_data['type']))
+call_llm_with_context_runnable = RunnableLambda(lambda prompt_data: call_llm_with_context(prompt_data))
+call_extract_relevant_data = RunnableLambda(lambda wrapped_response: call_populated_function(wrapped_response))
+return_raw_location_list_runnable = RunnableLambda(lambda raw_location_list: return_raw_location_list(raw_location_list))
 
-### Escalator Chains
-# scrape_and_embed_url = partial(embed_website)
-# return_converted_docs = RunnableLambda(lambda scrape_and_embed_url_output: convert_embeddings_to_docs(**scrape_and_embed_url_output))
-# wrap_llm_response = RunnableLambda(lambda pipeline_data: wrap_llm_with_context(pipeline_data, llm_linkedin_search_tags_extractor))
-# call_extract_relevant_search_tags = RunnableLambda(lambda llm_linkedin_search_tags_extractor_response: call_populated_function(**llm_linkedin_search_tags_extractor_response))
+# Extractor getPlaces api endpoint argument extraction chain; This is the endpoint that will receive user prompt
+extract_arguments_chain = (
+    RunnableParallel(
+        # custom_question_getter should get the user prompt, then vector embed them into a List[List[float]]
+        context=(custom_question_getter | return_converted_docs), # context is a List[List[Document]] that is made by first vector embedding the user prompt and then converting it to Document objects
+        instruction=itemgetter("instruction"),
+        id=itemgetter("id"),
+        type=itemgetter("type")
+        # file_embedding_keys=itemgetter("file_embedding_keys")
+    ) |
+    RunnableParallel(
+        results=(generate_prompt_runnable | call_llm_with_context_runnable | call_extract_relevant_data | return_raw_location_list_runnable), #type(return_raw_location_list) == List[Dict[locationId, rawLocationDict]] type(call_extract_relevant_data) == List[str] where each str is an argument for the API call.
+        # augment=lambda inputs: augment_context_with_file_embeddings(inputs["context"], inputs["file_embedding_keys"]),
+    ) |
+    RunnableParallel(
+        # Pipe result directly to start_extracting which needs its final output to be a List[List[Document]] for extracted locations
+        context=(start_extracting | return_converted_docs), # Return type of start_extracting == List[Dict[placeId, place_object]]; Turn these review entities to a combined List[List[float]] and pass it to return_converted_docs to result in List[List[Dict]]
+        question=itemgetter("question"),
+        type=itemgetter("type")
+    ) |
+    RunnableParallel (
+        answer = (ChatPromptTemplate.from_template(template=LOCATION_GUIDE_TEMPLATE) | llm_conversation),
+        # docs = custom_context_getter,
+        # augment = lambda inputs: augment_context_with_file_embeddings(inputs["context"], inputs["file_embedding_keys"]),
+        # augments = itemgetter("augment")
+    )
+).with_types(input_type=dict)
 
-# Define the chain with RunnableParallel and RunnableLambda
-# scrape_and_embed_url = partial(embed_website)
-# return_converted_docs = RunnableLambda(lambda data: convert_embeddings_to_docs(**data))
-# wrap_llm_response = RunnableLambda(lambda pipeline_data: wrap_llm_with_context(pipeline_data, llm_linkedin_search_tags_extractor))
-# call_extract_relevant_search_tags = RunnableLambda(lambda wrapped_response: call_populated_function(wrapped_response))
+# Extractor location generation chain; Called in parallel; arguments to each chain 
+location_generation_chain = (
+    RunnableParallel(
+        context=(return_review_embeddings | return_converted_docs), # turn review objects into a List[List[Document]]
+        instruction=itemgetter("instruction"),
+        id=itemgetter("id"),
+        type=itemgetter("type"),
+        review=itemgetter("review") # review == dict
+    ) |
+    RunnableParallel(
+        result=(generate_prompt_runnable | call_llm_with_context_runnable | call_extract_relevant_data) # result must be a Dict with the location id as the key and generated location object as the value.
+    )
+).with_types(input_type=dict)
 
-# Escalator Web Scraping Chain
-# web_scraping_chain = (
-#     RunnableParallel(
-#         context=(scrape_and_embed_url | return_converted_docs),
-#         instruction=itemgetter("instruction"),
-#         id=itemgetter("id"),
-#         file_embedding_keys=itemgetter("file_embedding_keys")
-#     ) |
-#     RunnableParallel(
-#         result=(ChatPromptTemplate.from_template(template=WEB_SCRAPING_TEMPLATE) | wrap_llm_response | call_extract_relevant_search_tags),
-#         augment = lambda inputs: augment_context_with_file_embeddings(inputs["context"], inputs["file_embedding_keys"]),
-#     )
-# ).with_types(input_type=LinkedinInput)
-
-# Wrapping both the template and the LLM
-# wrap_prompt_and_llm_response = RunnableLambda(lambda pipeline_data: wrap_prompt_and_llm(
-#     pipeline_data, 
-#     llm_linkedin_search_tags_extractor
-# ))
-
-# Wrapping both the template and the LLM
-# generate_prompt_runnable = RunnableLambda(lambda pipeline_data: generate_prompt(pipeline_data, pipeline_data['type']))
-# call_llm_with_context_runnable = RunnableLambda(lambda prompt_data: call_llm_with_context(prompt_data))
-# call_extract_relevant_search_tags = RunnableLambda(lambda wrapped_response: call_populated_function(wrapped_response))
-
-# web_scraping_chain = (
-#     RunnableParallel(
-#         context=(scrape_and_embed_url | return_converted_docs),
-#         instruction=itemgetter("instruction"),
-#         id=itemgetter("id"),
-#         type=itemgetter("type"),
-#         file_embedding_keys=itemgetter("file_embedding_keys")
-#     ) |
-#     RunnableParallel(
-#         result=(generate_prompt_runnable | call_llm_with_context_runnable | call_extract_relevant_search_tags),
-#         augment=lambda inputs: augment_context_with_file_embeddings(inputs["context"], inputs["file_embedding_keys"]),
-#     )
-# ).with_types(input_type=dict)
 
 # Default Chat Conversation Chain
 final_chain = (
