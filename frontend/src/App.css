@@ -1,0 +1,83 @@
+.App {
+  text-align: center;
+}
+
+.App-logo {
+  height: 40vmin;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .App-logo {
+    animation: App-logo-spin infinite 20s linear;
+  }
+}
+
+.App-header {
+  background-color: #282c34;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(10px + 2vmin);
+  color: white;
+}
+
+.App-link {
+  color: #61dafb;
+}
+
+.message-container {
+  padding: 1rem;
+  word-break: break-word; /* ensures long words do not cause overflow */
+  overflow-wrap: break-word; /* ensures the text breaks to prevent overflow */
+  white-space: pre-wrap; /* respects whitespace but wraps text */
+}
+
+/* Additional styles to handle potential horizontal scrolling */
+.message-container pre {
+  overflow-x: auto; /* enables horizontal scrolling for <pre> elements */
+  white-space: pre-wrap; /* respects whitespace and wraps text */
+}
+
+.message-container,
+.message-container pre,
+.message-container a,
+.textarea,
+.button {
+  color: #ffffff; /* This sets the text color to white */
+}
+
+@keyframes App-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner-container {
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+}
+
+.loading-spinner {
+  border: 4px solid rgba(255, 255, 255, 0.3);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border-left-color: #ffffff;
+  animation: spin 1s infinite linear;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}

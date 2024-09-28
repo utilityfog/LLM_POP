@@ -1,0 +1,159 @@
+[tool.poetry]
+name = "templates"
+version = "0.0.0"
+description = ""
+authors = []
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+
+# dev, test, lint, typing
+langchain = ">=0.0.353,<0.2"
+anthropic-iterative-search = {path = "packages/anthropic-iterative-search", develop = true}
+basic_critique_revise = {path = "packages/basic_critique_revise", develop = true}
+bedrock-jcvd = {path = "packages/bedrock-jcvd", develop = true}
+cassandra-entomology-rag = {path = "packages/cassandra-entomology-rag", develop = true}
+cassandra-synonym-caching = {path = "packages/cassandra-synonym-caching", develop = true}
+chain-of-note-wiki = {path = "packages/chain-of-note-wiki", develop = true}
+chat-bot-feedback = {path = "packages/chat-bot-feedback", develop = true}
+cohere-librarian = {path = "packages/cohere-librarian", develop = true}
+csv-agent = {path = "packages/csv-agent", develop = true}
+elastic-query-generator = {path = "packages/elastic-query-generator", develop = true}
+extraction-anthropic-functions = {path = "packages/extraction-anthropic-functions", develop = true}
+extraction-openai-functions = {path = "packages/extraction-openai-functions", develop = true}
+gemini-functions-agent = {path = "packages/gemini-functions-agent", develop = true}
+guardrails-output-parser = {path = "packages/guardrails-output-parser", develop = true}
+hybrid-search-weaviate = {path = "packages/hybrid-search-weaviate", develop = true}
+hyde = {path = "packages/hyde", develop = true}
+llama2-functions = {path = "packages/llama2-functions", develop = true}
+mongo-parent-document-retrieval = {path = "packages/mongo-parent-document-retrieval", develop = true}
+neo4j-advanced-rag = {path = "packages/neo4j-advanced-rag", develop = true}
+neo4j-cypher-ft = {path = "packages/neo4j-cypher-ft", develop = true}
+neo4j-cypher-memory = {path = "packages/neo4j-cypher-memory", develop = true}
+neo4j-cypher = {path = "packages/neo4j-cypher", develop = true}
+neo4j-generation = {path = "packages/neo4j-generation", develop = true}
+neo4j-parent = {path = "packages/neo4j-parent", develop = true}
+neo4j-semantic-layer = {path = "packages/neo4j-semantic-layer", develop = true}
+neo4j-semantic-ollama = {path = "packages/neo4j-semantic-ollama", develop = true}
+neo4j-vector-memory = {path = "packages/neo4j-vector-memory", develop = true}
+nvidia-rag-canonical = {path = "packages/nvidia-rag-canonical", develop = true}
+openai-functions-agent-gmail = {path = "packages/openai-functions-agent-gmail", develop = true}
+openai-functions-agent = {path = "packages/openai-functions-agent", develop = true}
+openai-functions-tool-retrieval-agent = {path = "packages/openai-functions-tool-retrieval-agent", develop = true}
+pii_protected_chatbot = {path = "packages/pii_protected_chatbot", develop = true}
+pirate-speak-configurable = {path = "packages/pirate-speak-configurable", develop = true}
+pirate-speak = {path = "packages/pirate-speak", develop = true}
+plate-chain = {path = "packages/plate-chain", develop = true}
+propositional-retrieval = {path = "packages/propositional-retrieval", develop = true}
+python-lint = {path = "packages/python-lint", develop = true}
+astradb_entomology_rag = {path = "packages/astradb_entomology_rag", develop = true}
+rag-aws-bedrock = {path = "packages/rag-aws-bedrock", develop = true}
+rag-aws-kendra = {path = "packages/rag-aws-kendra", develop = true}
+rag-chroma-multi-modal-multi-vector = {path = "packages/rag-chroma-multi-modal-multi-vector", develop = true}
+rag-chroma-multi-modal = {path = "packages/rag-chroma-multi-modal", develop = true}
+rag-chroma-private = {path = "packages/rag-chroma-private", develop = true}
+rag-chroma = {path = "packages/rag-chroma", develop = true}
+rag-codellama-fireworks = {path = "packages/rag-codellama-fireworks", develop = true}
+rag_conversation_zep = {path = "packages/rag_conversation_zep", develop = true}
+rag-conversation = {path = "packages/rag-conversation", develop = true}
+rag-elasticsearch = {path = "packages/rag-elasticsearch", develop = true}
+rag-fusion = {path = "packages/rag-fusion", develop = true}
+rag-gemini-multi-modal = {path = "packages/rag-gemini-multi-modal", develop = true}
+rag-google-cloud-sensitive-data-protection = {path = "packages/rag-google-cloud-sensitive-data-protection", develop = true}
+rag-google-cloud-vertexai-search = {path = "packages/rag-google-cloud-vertexai-search", develop = true}
+rag-gpt-crawler = {path = "packages/rag-gpt-crawler", develop = true}
+rag-lancedb = {path = "packages/rag-lancedb", develop = true}
+rag-matching-engine = {path = "packages/rag-matching-engine", develop = true}
+rag-momento-vector-index = {path = "packages/rag-momento-vector-index", develop = true}
+rag-mongo = {path = "packages/rag-mongo", develop = true}
+rag-multi-index-fusion = {path = "packages/rag-multi-index-fusion", develop = true}
+rag-multi-index-router = {path = "packages/rag-multi-index-router", develop = true}
+rag-multi-modal-local = {path = "packages/rag-multi-modal-local", develop = true}
+rag-multi-modal-mv-local = {path = "packages/rag-multi-modal-mv-local", develop = true}
+rag-ollama-multi-query = {path = "packages/rag-ollama-multi-query", develop = true}
+rag-opensearch = {path = "packages/rag-opensearch", develop = true}
+rag-pinecone-multi-query = {path = "packages/rag-pinecone-multi-query", develop = true}
+rag-pinecone-rerank = {path = "packages/rag-pinecone-rerank", develop = true}
+rag-pinecone = {path = "packages/rag-pinecone", develop = true}
+rag-redis-multi-modal-multi-vector = {path = "packages/rag-redis-multi-modal-multi-vector", develop = true}
+rag-redis = {path = "packages/rag-redis", develop = true}
+rag-self-query = {path = "packages/rag-self-query", develop = true}
+rag-semi-structured = {path = "packages/rag-semi-structured", develop = true}
+rag-singlestoredb = {path = "packages/rag-singlestoredb", develop = true}
+rag-supabase = {path = "packages/rag-supabase", develop = true}
+rag-timescale-conversation = {path = "packages/rag-timescale-conversation", develop = true}
+rag-timescale-hybrid-search-time = {path = "packages/rag-timescale-hybrid-search-time", develop = true}
+rag-vectara-multiquery = {path = "packages/rag-vectara-multiquery", develop = true}
+rag-vectara = {path = "packages/rag-vectara", develop = true}
+rag-weaviate = {path = "packages/rag-weaviate", develop = true}
+research-assistant = {path = "packages/research-assistant", develop = true}
+retrieval-agent-fireworks = {path = "packages/retrieval-agent-fireworks", develop = true}
+retrieval-agent = {path = "packages/retrieval-agent", develop = true}
+rewrite-retrieve-read = {path = "packages/rewrite-retrieve-read", develop = true}
+robocorp-action-server = {path = "packages/robocorp-action-server", develop = true}
+self-query-qdrant = {path = "packages/self-query-qdrant", develop = true}
+self-query-supabase = {path = "packages/self-query-supabase", develop = true}
+shopping-assistant = {path = "packages/shopping-assistant", develop = true}
+skeleton-of-thought = {path = "packages/skeleton-of-thought", develop = true}
+solo-performance-prompting-agent = {path = "packages/solo-performance-prompting-agent", develop = true}
+sql-llama2 = {path = "packages/sql-llama2", develop = true}
+sql-llamacpp = {path = "packages/sql-llamacpp", develop = true}
+sql-ollama = {path = "packages/sql-ollama", develop = true}
+sql-pgvector = {path = "packages/sql-pgvector", develop = true}
+sql-research-assistant = {path = "packages/sql-research-assistant", develop = true}
+stepback-qa-prompting = {path = "packages/stepback-qa-prompting", develop = true}
+summarize-anthropic = {path = "packages/summarize-anthropic", develop = true}
+vertexai-chuck-norris = {path = "packages/vertexai-chuck-norris", develop = true}
+xml-agent = {path = "packages/xml-agent", develop = true}
+
+[tool.poetry.group.dev]
+optional = true
+
+[tool.poetry.group.dev.dependencies]
+poethepoet = "^0.24.1"
+pytest-watch = "^4.2.0"
+langchain-cli = ">=0.0.21"
+
+[tool.poetry.group.test]
+optional = true
+
+[tool.poetry.group.test.dependencies]
+pytest = "^7.4.3"
+
+[tool.poetry.group.lint]
+optional = true
+
+[tool.poetry.group.lint.dependencies]
+poethepoet = "^0.24.1"
+ruff = "^0.1.3"
+langchain = { path = "../libs/langchain", develop = true }
+langchain-core = { path = "../libs/core", develop = true }
+
+[tool.poetry.group.typing]
+optional = true
+
+[tool.poetry.group.typing.dependencies]
+
+[tool.ruff.lint]
+select = [
+  "E",  # pycodestyle
+  "F",  # pyflakes
+  "I",  # isort
+]
+
+[tool.poe.tasks]
+test = "poetry run pytest"
+watch = "poetry run ptw"
+lint = ["_lint", "_check_formatting"]
+format = ["_lint_fix", "_format"]
+
+_check_formatting = "poetry run ruff format . --diff"
+_lint = "poetry run ruff ."
+_format = "poetry run ruff format ."
+_lint_fix = "poetry run ruff . --fix"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

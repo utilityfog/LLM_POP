@@ -1,0 +1,12 @@
+Metadata-Version: 2.1
+Name: libdeeplake
+Version: 0.0.129
+Summary: C++ backend for Deep Lake
+Author: activeloop.ai
+Author-email: support@activeloop.ai
+Project-URL: Documentation, https://docs.activeloop.ai/
+Project-URL: Source, https://github.com/activeloopai/indra
+Description-Content-Type: text/markdown
+Requires-Dist: numpy
+Requires-Dist: dill
+
