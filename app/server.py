@@ -141,9 +141,9 @@ async def service_worker_js():
     file_path = './app/service-worker-popup.js'
     return FileResponse(file_path, media_type="application/javascript")
 
-def retrieve_top20_profiles(session_id: str, job_posting_embeddings: List[List[float]], preprocessing_results):
+def retrieve_top_20_attractions(session_id: str, attraction_embeddings: List[List[float]], preprocessing_results):
     # Convert the list into a dictionary, preprocessing_results must never be empty
-    pdfname_to_profile_dict = {list(item['result'].keys())[0]: list(item['result'].values())[0] for item in preprocessing_results}
+    jsonname_to_profile_dict = {list(item['result'].keys())[0]: list(item['result'].values())[0] for item in preprocessing_results}
     
     pgvectorstore = get_session_vector_store(session_id)
     session_vector_store = PGVectorWithEmbeddings(pgvectorstore)
@@ -154,7 +154,7 @@ def retrieve_top20_profiles(session_id: str, job_posting_embeddings: List[List[f
     seen_paths = set()
     extracted = False
     
-    for job_posting_embedding in job_posting_embeddings:
+    for attraction_embedding in attraction_embeddings:
         if extracted:
             break
         
