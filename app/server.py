@@ -141,6 +141,62 @@ async def service_worker_js():
     file_path = './app/service-worker-popup.js'
     return FileResponse(file_path, media_type="application/javascript")
 
+def retrieve_top20_profiles(session_id: str, job_posting_embeddings: List[List[float]], preprocessing_results):
+    # Convert the list into a dictionary, preprocessing_results must never be empty
+    pdfname_to_profile_dict = {list(item['result'].keys())[0]: list(item['result'].values())[0] for item in preprocessing_results}
+    
+    pgvectorstore = get_session_vector_store(session_id)
+    session_vector_store = PGVectorWithEmbeddings(pgvectorstore)
+    profile_embeddings: {str : List[List[float]]} = {}
+    
+    # To prevent repeats
+    unique_profiles = []
+    seen_paths = set()
+    extracted = False
+    
+    for job_posting_embedding in job_posting_embeddings:
+        if extracted:
+            break
+        
+        # Perform similarity search
+        results = session_vector_store.similarity_search_with_score_by_vector(job_posting_embedding, k=3)
+        
+        for doc, embedding, _ in results:
+            # print(f"doc: {doc}")
+            path = doc.metadata['source']
+            basename = os.path.basename(path) # profile pdf basename
+            # Fetch profile object from dict using basename
+            profile = pdfname_to_profile_dict.get(basename)
+            # Fetch id of profile
+            id = profile['id']
+            
+            if path not in seen_paths:
+                # append profile to unique profiles
+                unique_profiles.append(profile)
+                seen_paths.add(path)
+            if len(unique_profiles) >= 21:
+                extracted = True
+                break
+            
+            if id not in profile_embeddings:
+                profile_embeddings[id] = []
+            profile_embeddings[id].append(embedding.tolist())
+            
+    profile_embeddings_data_file = f"./database/profile_embeddings_{session_id}.json"
+    with open(profile_embeddings_data_file, "w", encoding="utf-8") as f:
+        json.dump(profile_embeddings, f)
+        
+    # Reset global session vector store and embeddings storage
+    reset_session_vector_store(session_id=session_id)
+    reset_embeddings_storage()
+    
+    if extracted:
+        print("broken in the middle")
+        return unique_profiles[:-1]
+    
+    print(f"number of extracted unique profiles: {len(unique_profiles)}")
+    return unique_profiles
+
 # executor = ThreadPoolExecutor(max_workers=1)
 # @app.post("/start-networking")
 # async def start_networking(request: Request):
