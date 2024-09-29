@@ -78,6 +78,10 @@ class Extractor:
                             "type": "string",
                             "description": "Physical address of the location"
                         },
+                        "url": {
+                            "type": "string",
+                            "description": "url of the location's details"
+                        },
                         "pros": {
                             "type": "string",
                             "description": "Things that are good about the location"

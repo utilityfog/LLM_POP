@@ -332,7 +332,7 @@ def reset_embeddings_storage():
 # Session EMBEDDINGS_STORAGE
 FILE_PATH_DICT: {str : str} = {}
 
-def store_pdf_path(unique_id: str, file_path: str):
+def store_file_path(unique_id: str, file_path: str):
     global FILE_PATH_DICT
     FILE_PATH_DICT[unique_id] = file_path
     

@@ -65,7 +65,7 @@ from selenium.webdriver.chrome.options import Options as ChromeOptions
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 
-from app.embeddings_manager import get_session_vector_store, store_embedding, get_current_session_id, store_pdf_path, get_window_handler
+from app.embeddings_manager import get_session_vector_store, store_embedding, get_current_session_id, store_file_path, get_window_handler
 from app.config import EMBEDDING_MODEL, PG_COLLECTION_NAME
 
 load_dotenv()
@@ -302,7 +302,7 @@ class WebProcessor:
                 break
     
 class FileProcessor:
-    async def process_documents(self, directory_path: Path, file_path, glob_pattern, loader_cls, text_splitter, embeddings, session_vector_store=None, session_id=None):
+    async def process_documents(self, directory_path: Path, file_path, glob_pattern, loader_cls, text_splitter, embeddings, session_vector_store=None, unique_id=None, session_id=None):
         """To ensure that the process_documents method accurately processes only PDF files, one can modify the glob_pattern parameter used in the DirectoryLoader to specifically target PDF files. This adjustment will make the method more focused and prevent it from attempting to process files of other types, which might not be suitable for the intended processing pipeline."""
         print(f"loader_cls: {loader_cls}")
         directory_path_str = str(directory_path)
@@ -320,9 +320,13 @@ class FileProcessor:
             loader_cls=loader_cls,
         )
         docs = loader.load()
-        
-        # Get the base name (without extension) of each pdf file in the directory_path
-        file_name = os.path.splitext(os.path.basename(file_path))[0]
+        if unique_id is not None:
+            print("Storing json for ")
+            store_file_path(unique_id=unique_id, file_path=os.path.basename(file_path))
+        else:
+            print("Storing json for ")
+            store_file_path(unique_id=session_id, file_path=os.path.basename(file_path))
+        print(f"unique id: {unique_id}")
         chunks = docs
         
         print(f"docs after chunking: {chunks}")
@@ -517,15 +521,12 @@ class FileEmbedder:
             process_args = processing_info["args"]
 
             if file_type in ['pdf', 'ipynb', 'txt', 'csv']:
-                current_embeddings = await process_func(directory_path=directory_path, file_path=file_path, glob_pattern=glob_pattern, **process_args, text_splitter=text_splitter, embeddings=embeddings, session_vector_store=self.session_vector_store, session_id=self.session_id)
+                current_embeddings = await process_func(directory_path=directory_path, file_path=file_path, glob_pattern=glob_pattern, **process_args, text_splitter=text_splitter, embeddings=embeddings, session_vector_store=self.session_vector_store, unique_id=unique_id, session_id=self.session_id)
             elif file_type == 'code':
                 current_embeddings = await process_func(repo_path=directory_path, **process_args, embeddings=embeddings, session_vector_store=self.session_vector_store, session_id=self.session_id)
             elif file_type == 'png':
                 # Embed Images
                 current_embeddings = await process_func(directory_path=str(directory_path), file_path=file_path, glob_pattern=glob_pattern, **process_args, text_splitter=text_splitter, embeddings=embeddings, session_vector_store=self.session_vector_store, session_id=self.session_id)
-            elif file_type == 'html':
-                # Embed Website
-                current_embeddings = await process_func(driver=driver, unique_id=unique_id, upload_folder=directory_path, url=url, **process_args, text_splitter=text_splitter, embeddings=embeddings, session_vector_store=self.session_vector_store, session_id=self.session_id, file_path=file_path, name=name)
             else:
                 return {"error": f"Processing for file type {file_type} is not implemented or unrecognized."}
             

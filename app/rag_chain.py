@@ -218,7 +218,7 @@ LOCATION_GUIDE_TEMPLATE = """
 Provide a friendly guide of locations a user would like to visit based on the given location reviews corresponding to the prompt, given the following:
 
 Detailed Prompt: 
-{instruction}
+{prompt}
 
 Vector Embedded Location Reviews for Locations related to the prompt: 
 {context}
@@ -425,7 +425,16 @@ def get_prompt_data(prompt_id):
 
 def retrieve_top_10_attractions(session_id: str, user_prompt_embeddings: List[List[float]], preprocessing_results):
     # Convert the list into a dictionary, preprocessing_results must never be empty
-    jsonname_to_location_dict = {list(item['result'].keys())[0]: list(item['result'].values())[0] for item in preprocessing_results}
+    jsonname_to_location_dict = {}
+    for item in preprocessing_results:
+        if item and item.get('result'):
+            result = item['result']
+            keys = list(result.keys())
+            values = list(result.values())
+            if keys and values:
+                jsonname_to_location_dict[keys[0]] = values[0]
+                
+    print(f"location_json_to_location_object_dict: {jsonname_to_location_dict}")
     
     pgvectorstore = get_session_vector_store(session_id)
     session_vector_store = PGVectorWithEmbeddings(pgvectorstore)
@@ -442,28 +451,32 @@ def retrieve_top_10_attractions(session_id: str, user_prompt_embeddings: List[Li
         
         # Perform similarity search
         results = session_vector_store.similarity_search_with_score_by_vector(user_prompt_embedding, k=3)
-        
-        for doc, embedding, _ in results:
-            # print(f"doc: {doc}")
-            path = doc.metadata['source']
-            basename = os.path.basename(path) # profile pdf basename
-            # Fetch profile object from dict using basename
-            location = jsonname_to_location_dict.get(basename)
-            # Fetch id of profile
-            id = location['id']
-            
-            if path not in seen_paths:
-                # append profile to unique profiles
-                unique_attractions.append(location)
-                unique_attractions_embeddings.append(embedding)
-                seen_paths.add(path)
-            if len(unique_attractions) >= 11:
-                extracted = True
-                break
-            
-            if id not in unique_attractions_embeddings:
-                unique_attractions_embeddings[id] = []
-            unique_attractions_embeddings[id].append(embedding.tolist())
+        print(f"retrieved results: {results}")
+        if results:
+            for doc, embedding, _ in results:
+                try:
+                    # print(f"doc: {doc}")
+                    path = doc.metadata['source']
+                    basename = os.path.basename(path) # profile pdf basename
+                    # Fetch profile object from dict using basename
+                    location = jsonname_to_location_dict.get(basename)
+                    # Fetch id of profile
+                    id = location['id']
+                    
+                    if path not in seen_paths:
+                        # append profile to unique profiles
+                        unique_attractions.append(location)
+                        unique_attractions_embeddings.append(embedding)
+                        seen_paths.add(path)
+                    if len(unique_attractions) >= 11:
+                        extracted = True
+                        break
+                    
+                    if id not in unique_attractions_embeddings:
+                        unique_attractions_embeddings[id] = []
+                    unique_attractions_embeddings[id].append(embedding.tolist())
+                except Exception as e:
+                    print(f"Fuck {e}")
             
     attractions_embeddings_data_file = f"./database/attractions_embeddings_{session_id}.json"
     with open(attractions_embeddings_data_file, "w", encoding="utf-8") as f:
@@ -478,7 +491,7 @@ def retrieve_top_10_attractions(session_id: str, user_prompt_embeddings: List[Li
         return unique_attractions[:-1]
     
     print(f"number of extracted unique attractions: {len(unique_attractions)}")
-    return unique_attractions, unique_attractions_embeddings[id]
+    return unique_attractions, list(unique_attractions_embeddings.values())
 
 PROMPTS_DATA_FILE = "./database/prompts.json"
 
@@ -538,7 +551,10 @@ executor = ThreadPoolExecutor(max_workers=16)
 async def start_extracting(pipeline_data):
     print(f"Start Extracting Locations: {pipeline_data}")
     prompt_id = pipeline_data['id']
+    print(f"prompt id in start extracting: {prompt_id}")
     prompt_embedding, raw_location_list = get_prompt_data(prompt_id)
+    # print(f"start extracting raw location list: {raw_location_list}")
+    print(f"start_extracting prompt embedding: {prompt_embedding}")
     
     # input list
     initial_inputs = [
@@ -551,6 +567,7 @@ async def start_extracting(pipeline_data):
         }
         for location in raw_location_list[1::2]
     ]
+    print(f"initial inputs for start extracting: {initial_inputs}")
     
     # Function to create tasks for each input
     async def create_task(input_data):
@@ -563,7 +580,7 @@ async def start_extracting(pipeline_data):
             yield lst[i:i + n]
             
     # Divide initial_inputs into 16 roughly equal parts
-    num_chunks = 10
+    num_chunks = 4
     chunk_size = (len(initial_inputs) + num_chunks - 1) // num_chunks
     print(f"chunk size: {chunk_size}")
     input_chunks = list(chunk_list(initial_inputs, chunk_size))
@@ -589,7 +606,7 @@ async def start_extracting(pipeline_data):
     with open(attraction_data_file, "w", encoding="utf-8") as f:
         json.dump(unique_attractions_dict, f)
     
-    return {"attractions": retrieved_attractions}
+    return {"embeddings_list": retrieved_attractions_embeddings, "session_vector_store": get_session_vector_store(prompt_id, False)}
     
 def convert_embeddings_to_docs(embeddings_list: List[List[List[float]]], session_vector_store):
     # print(f"convert_embeddings_to_docs called! with session vector store: {session_vector_store}\n with embeddings: {embeddings_list}")
@@ -610,16 +627,17 @@ async def embed_content(inputs): # Embeds either user prompt or saved txt object
     # id = inputs['session_id'] # prompt_id or location_id, when its value is used, it is always location_id
     prompt = None
     type = inputs['type']
-    session_id = inputs['session_id']
+    id = None
     raw_location_object = None # Exclusive to generation type
     if type == "extraction":
         prompt = inputs['question']
-        set_current_session_id(session_id)
-        file_embedder = FileEmbedder(session_id)
+        set_current_session_id(inputs['session_id'])
+        file_embedder = FileEmbedder(inputs['session_id'])
     elif type == "generation":
+        id = inputs['id']
         raw_location_object = inputs['raw_location_object']
-        print(f"location session_id: {session_id}")
-        file_embedder = FileEmbedder(session_id, pre_delete_collection=False)
+        print(f"location session_id: {id}")
+        file_embedder = FileEmbedder(id, pre_delete_collection=False)
     
     ### Initialize text splitter
     text_splitter = SemanticChunker(embeddings=embedding_method)
@@ -628,45 +646,49 @@ async def embed_content(inputs): # Embeds either user prompt or saved txt object
         embeddings_list = []
         
         ### Use unique id which was generated from React side
-        unique_id = session_id
+        unique_id = id
         upload_folder = Path("./uploaded_files")
         
         ### Vector Embedding
         # Embed website to session vector store
         file_extension = "txt"
         file_embedding = None
+        file_path = None
         
         try:
             glob_pattern = f"**/*.{file_extension}"
             if type == "extraction":
-                print("embed content Extraction type")
+                print(f"embed content Extraction type: {inputs['session_id']}")
                 # Save User Prompt: str as txt to prompt_file_path that starts with f"./database/{unique_id}.txt"
-                prompt_file_path = f"./uploaded_files/prompt_{unique_id}.txt"
+                file_path = upload_folder / f"prompt_{inputs['session_id']}.txt"
                 
                 # Write the prompt to a text file
                 try:
-                    async with aiofiles.open(prompt_file_path, "w", encoding="utf-8") as f:
+                    async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
                         await f.write(prompt)
-                    print(f"Saved user prompt to: {prompt_file_path}")
+                    print(f"Saved user prompt to: {file_path}")
                 except Exception as e:
                     print(f"Failed to save user prompt: {e}")
                 
-                file_embedding = await file_embedder.process_and_embed_file(directory_path=upload_folder, file_path=prompt_file_path, unique_id=unique_id, url=None, embeddings=embedding_method, glob_pattern=glob_pattern, text_splitter=text_splitter) # unique_id here is randomized prompt_id
+                file_embedding = await file_embedder.process_and_embed_file(directory_path=upload_folder, file_path=file_path, unique_id=unique_id, url=None, embeddings=embedding_method, glob_pattern=glob_pattern, text_splitter=text_splitter) # unique_id here is randomized prompt_id
             elif type == "generation":
                 # Save Review: Dict as txt to review_file_path that starts with f"./database/attraction_review_{unique_id}.txt"
-                review_file_path = f"./uploaded_files/attraction_review_{unique_id}.txt"
+                file_path = upload_folder / f"location_object_{unique_id}.txt"
                 
                 # Write the review (dict) to a text file
                 try:
-                    async with aiofiles.open(review_file_path, "w", encoding="utf-8") as f:
+                    async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
                         await f.write(json.dumps(raw_location_object))
-                    print(f"Saved review to: {review_file_path}")
+                    print(f"Saved review to: {file_path}")
                 except Exception as e:
                     print(f"Failed to save review: {e}")
                 
-                file_embedding = await file_embedder.process_and_embed_file(directory_path=upload_folder, file_path=review_file_path, unique_id=unique_id, url=None, embeddings=embedding_method, glob_pattern=glob_pattern, text_splitter=text_splitter) # unique_id here is extracted location_id
+                file_embedding = await file_embedder.process_and_embed_file(directory_path=upload_folder, file_path=file_path, unique_id=unique_id, url=None, embeddings=embedding_method, glob_pattern=glob_pattern, text_splitter=text_splitter) # unique_id here is extracted location_id
         except Exception as e:
             raise f"Error processing content: {e}"
+        finally:
+            # Delete the file after processing it to avoid redundancy
+            file_path.unlink(missing_ok=True)  # Use missing_ok=True to ignore the error if the file doesn't exist
         
         # Append to embeddings
         embeddings_list.append(file_embedding)
@@ -674,15 +696,15 @@ async def embed_content(inputs): # Embeds either user prompt or saved txt object
         # IFF type == extraction
         if type == "extraction":
             # Save the dictionary that uses unique_id as key and embeddings_list as value as json to system to mimic persistence
-            prompt_data_file = f"./database/prompt_{unique_id}.json"
-            prompt_dict = {unique_id: file_embedding}
+            prompt_data_file = f"./database/prompt_{inputs['session_id']}.json"
+            prompt_dict = {inputs['session_id']: file_embedding}
             async with aiofiles.open(prompt_data_file, "w", encoding="utf-8") as f:
                 await f.write(json.dumps(prompt_dict))
         
         # print(f"embeddings list: {embeddings_list}")
         
         # Return PDF embeddings_list: List[List[List[float]]] and session vector store for entire research session
-        return {"embeddings_list": embeddings_list, "session_vector_store": get_session_vector_store(session_id, False)}
+        return {"embeddings_list": embeddings_list, "session_vector_store": get_session_vector_store(inputs['session_id'], False)}
     except HttpError as error:
         print(f"An error occurred: {error}")
     print("\n----------------------------------------\n")
@@ -843,7 +865,53 @@ def getIDs(args):
         myResponse.raise_for_status()
     return idList
 
-executor = ThreadPoolExecutor(max_workers=16)  # Adjust max_workers as needed
+executor = ThreadPoolExecutor(max_workers=8)  # Adjust max_workers as needed
+# def fetch_reviews_for_id(id):
+#     # Dictionary to store results for the specific ID
+#     locations_raw_object_dict = {}
+#     reviews = []
+   
+#     # Fetch reviews
+#     url = f"http://tour-pedia.org/api/getReviewsByPlaceId?language=en&placeId={str(id)}"
+#     try:
+#         response = requests.get(url, timeout=10)
+#         response.raise_for_status()
+#         jData = json.loads(response.content)
+#         reviews = [review['text'] for review in jData if 'text' in review]  # Extract reviews
+
+
+#     except requests.exceptions.RequestException as e:
+#         print(f"Error fetching reviews for {id}: {e}")
+#         return {id: {"error": str(e)}}
+   
+#     # if the reviews list has elements, if not, that id is not added to the dict
+#     if len(reviews) != 0:
+#         # store reviews
+#         locations_raw_object_dict[id] = [reviews]
+       
+#         # Fetch place details
+#         placeName = ""
+#         placeAddy = ""
+#         details_url = f"http://tour-pedia.org/api/getPlaceDetails?id={str(id)}"
+#         try:
+#             response = requests.get(details_url, timeout=10)
+#             response.raise_for_status()
+#             jData = json.loads(response.content)
+#             placeName = jData.get("name", "")
+#             placeAddy = jData.get("address", "")
+
+
+#         except requests.exceptions.RequestException as e:
+#             print(f"Error fetching details for {id}: {e}")
+#             return {id: {"error": str(e)}}
+       
+#         # Store place details
+#         locations_raw_object_dict[id].append(placeName)
+#         locations_raw_object_dict[id].append(placeAddy)
+#         locations_raw_object_dict[id].append(details_url)
+   
+#     return locations_raw_object_dict
+
 def fetch_reviews_for_id(id):
     # Dictionary to store results for the specific ID
     locations_raw_object_dict = {}
@@ -1000,13 +1068,13 @@ async def return_raw_location_list(input):
     # Define async function to handle getReviews call
     async def fetch_reviews_async(id_list):
         print("Start fetching reviews")
-        location_raw_object_list = await loop.run_in_executor(executor, lambda: getReviews(id_list))
+        location_raw_objects_dict = await loop.run_in_executor(executor, lambda: getReviews(id_list))
         print("Finished fetching reviews")
-        return location_raw_object_list
+        return location_raw_objects_dict
 
     # Call the async getReviews and wait for the results
     location_raw_object_dict = await fetch_reviews_async(id_list)
-    print("Get Reviews Success")
+    print(f"Get Reviews Success: {location_raw_object_dict}")
 
     # Convert dict to list where each item is a dict of a single key-value pair
     location_raw_object_list = [{location_id: raw_object} for location_id, raw_object in location_raw_object_dict.items()]
@@ -1072,21 +1140,21 @@ extract_arguments_chain = (
     ) |
     RunnableParallel(
         id=itemgetter("id"),
+        file_embedding_keys=itemgetter("file_embedding_keys"),
         prompt=custom_question_getter,
         results=(generate_prompt_runnable | call_llm_with_context_runnable | call_extract_relevant_data | return_raw_location_list_runnable) # type(return_raw_location_list_runnable) == List[Dict[locationId, rawLocationDict]] type(call_extract_relevant_data) == List[str] where each str is an argument for the API call.
         # augment=lambda inputs: augment_context_with_file_embeddings(inputs["context"], inputs["file_embedding_keys"]),
     ) |
     RunnableParallel(
         # Pipe result directly to start_extracting which needs its final output to be a List[List[Document]] for extracted locations
+        file_embedding_keys=itemgetter("file_embedding_keys"),
         context=(start_extraction_runnable | return_converted_docs), # Return type of start_extracting == List[Dict[placeId, place_object]]; Turn these review entities to a combined List[List[float]] and pass it to return_converted_docs to result in List[List[Dict]]
         prompt=itemgetter("prompt")
-        # type=itemgetter("type")
     ) |
     RunnableParallel (
         answer = (ChatPromptTemplate.from_template(template=LOCATION_GUIDE_TEMPLATE) | llm_conversation),
-        # docs = custom_context_getter,
-        # augment = lambda inputs: augment_context_with_file_embeddings(inputs["context"], inputs["file_embedding_keys"]),
-        # augments = itemgetter("augment")
+        docs = custom_context_getter,
+        augment = lambda inputs: augment_context_with_file_embeddings(inputs["context"], inputs["file_embedding_keys"]),
     )
 ).with_types(input_type=dict)
 

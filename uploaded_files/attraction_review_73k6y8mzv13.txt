@@ -1,1 +1,0 @@
-[[], "Denny,s", "London, , United Kingdom", "http://tour-pedia.org/api/getPlaceDetails?id=220239"]/tour-pedia.org/api/getPlaceDetails?id=219959"]

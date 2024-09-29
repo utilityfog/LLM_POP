@@ -1,1 +1,0 @@
-[[], "White Cross Inn", "146 North Cray Rd, London, DA14 5EL, United Kingdom", "http://tour-pedia.org/api/getPlaceDetails?id=220310"]
