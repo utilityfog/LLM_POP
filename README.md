@@ -1,3 +1,5 @@
+# UPDATE: RUNNER-UP WINNER of Carolina Data Challenge 2024!
+
 # TOUR GPT
 Application of RAG and LLM Fine Tuning in Pop Culture Analysis
 
