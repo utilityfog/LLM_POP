@@ -14,7 +14,7 @@ from nbclient import NotebookClient
 from app.embeddings_manager import get_current_session_id, get_embedding_from_manager
 from importer.load_and_process import FileEmbedder
 
-class JupyterSolver:
+class Automator:
     def convert_embeddings_to_documents(self, embeddings: List[List[float]], session_vector_store) -> List[List[Document]]:
         print("Converting received embeddings to documents")
         documents: List[List[Document]] = []

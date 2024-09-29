@@ -304,6 +304,7 @@ class WebProcessor:
 class FileProcessor:
     async def process_documents(self, directory_path: Path, file_path, glob_pattern, loader_cls, text_splitter, embeddings, session_vector_store=None, session_id=None):
         """To ensure that the process_documents method accurately processes only PDF files, one can modify the glob_pattern parameter used in the DirectoryLoader to specifically target PDF files. This adjustment will make the method more focused and prevent it from attempting to process files of other types, which might not be suitable for the intended processing pipeline."""
+        print(f"loader_cls: {loader_cls}")
         directory_path_str = str(directory_path)
         
         # pdf_glob_pattern = "**/*.pdf"  # Updated to specifically target PDF files
@@ -322,64 +323,13 @@ class FileProcessor:
         
         # Get the base name (without extension) of each pdf file in the directory_path
         file_name = os.path.splitext(os.path.basename(file_path))[0]
-        
-        # get image container folder for pdf
-        images_write_folder_path = directory_path / f"{file_name}_images"
-        
-        # Use partition to extract images to a directory
-        raw_pdf_elements = partition(
-            filename=file_path,
-            content_type="application/pdf",
-            extract_images_in_pdf=True,
-            pdf_infer_table_structure=True,
-            skip_infer_table_types=[],
-            chunking_strategy="basic",
-            max_characters=160000,
-            extract_image_block_output_dir=str(images_write_folder_path)
-        )
-        
-        # Process image elements
-        image_elements = []
-        for image_file in os.listdir(str(images_write_folder_path)):
-            if image_file.endswith(('.png', '.jpg', '.jpeg')):
-                image_path = os.path.join(str(images_write_folder_path), image_file)
-                encoded_image = encode_image(image_path)
-                image_elements.append(encoded_image)
-        image_summaries = []
-        # for i, ie in enumerate(image_elements):
-        #     summary = summarize_image(ie)
-        #     image_summaries.append(summary)
-        
-        # Run summarize_images_job asynchronously
-        try:
-            image_summaries = asyncio.run(summarize_images_job(image_elements))
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            
-        # Prepare List[Document] for PDF without its Images
-        
-        # For each extracted image in image_write_folder_path, embed them separately but add metadata from docs
-        # How? Heuristic: Get the metadata of the first Document object of chunks and then add the metadata as a property of each Document object for the image(s)
-        metadata = docs[0].metadata # This metadata is same for all images extracted from the same pdf
-        image_docs: List[Document] = []
-        for s in image_summaries:
-            image_docs.append(Document(page_content=s, metadata=metadata))
-        
-        docs.extend(image_docs) # Extend List[Document] without images with List[Document] of just image summaries
-        
         chunks = docs
-        # Split documents into meaningful chunks
-        if extracted_extension != 'csv':
-            chunks = text_splitter.split_documents(docs)
-        # print(f"docs after chunking: {chunks}")
-            
-        # print(f"image docs: {image_docs}")
         
         print(f"docs after chunking: {chunks}")
         store, current_embeddings = await PGVector.from_documents(
             documents=chunks,
             embedding=embeddings,
-            chunk_size=100,
+            chunk_size=10,
             collection_name=PG_COLLECTION_NAME,
             connection_string=os.getenv("POSTGRES_URL"),
             pre_delete_collection=False,  # Controls whether to clear the collection before adding new docs
@@ -395,11 +345,6 @@ class FileProcessor:
                 connection_string=os.getenv("POSTGRES_URL"),
                 pre_delete_collection=False,  # Controls whether to clear the collection before adding new docs
             )
-        # print(f"chunks vectorized: {len(chunks)}")
-        
-        # Remove entire images folder
-        shutil.rmtree(images_write_folder_path, ignore_errors=False, onerror=None)
-
         return current_embeddings
 
     async def process_code(self, repo_path, suffixes, language_setting, embeddings, parser_threshold=500, session_vector_store=None, session_id=None):
@@ -493,87 +438,6 @@ class FileProcessor:
             )
         print(f"chunks vectorized: {len(chunks)}")
         return current_embeddings
-    
-    async def process_website(self, unique_id: str, upload_folder: Path, url, loader_cls: SeleniumURLLoader, text_splitter, embeddings, session_vector_store=None, driver=None, session_id=None, file_path=None, name=None):
-        """Method that receives a url, vector embeds the url, and """
-        ### Download landing page as PDF
-        web_processor = WebProcessor()
-
-        # Dynamic uc.Chrome initialization
-        if driver:
-            web_processor.driver = driver
-            pdf_path, pdf_parent_path = await web_processor.download_url_as_pdf(True, url, upload_folder, session_id, file_path, name)
-        else:
-            try:
-                # service=ChromeService(ChromeDriverManager().install()),
-                webdriver_options = uc.ChromeOptions()
-                webdriver_options.add_argument('--headless')
-                webdriver_options.add_argument("--no-sandbox")
-                webdriver_options.add_argument("--disable-dev-shm-usage")
-                
-                # Re-add 
-                # 1. LinkedinProfileScraper
-                # 2. 
-                
-                linkedin_profile_scraper_instance = None
-                # LinkedInProfileScraper(should_initialize_driver=False)
-                
-                chromedriver_path = linkedin_profile_scraper_instance.install_correct_chromedriver()
-                
-                web_processor.driver = uc.Chrome(
-                    executable_path=chromedriver_path, 
-                    options=webdriver_options, 
-                    use_subprocess=True, 
-                    enable_cdp_events=True
-                )
-                web_processor.wait = WebDriverWait(web_processor.driver, 10)
-                
-                pdf_path, pdf_parent_path = await web_processor.download_url_as_pdf(False, url, upload_folder)
-            finally:
-                web_processor.driver.close()
-        
-        loader = DirectoryLoader(
-            os.path.abspath(str(pdf_parent_path)), # parent of pdf_path
-            glob="**/*.pdf",
-            use_multithreading=True,
-            show_progress=True,
-            max_concurrency=50,
-            loader_cls=UnstructuredPDFLoader,
-        )
-        
-        docs = loader.load()
-        chunks = text_splitter.split_documents(docs)
-
-        current_embeddings = None
-        try:
-            store, current_embeddings = await PGVector.from_documents(
-                documents=chunks,
-                embedding=embeddings,
-                chunk_size=100,
-                collection_name=PG_COLLECTION_NAME,
-                connection_string=os.getenv("POSTGRES_URL"),
-                pre_delete_collection=False,
-            )
-            
-            if session_vector_store:
-                print(f"storing embeddings in session vector store with session_id {session_id}!")
-                store, current_embeddings = await session_vector_store.from_documents(
-                    documents=chunks,
-                    embedding=embeddings,
-                    chunk_size=100,
-                    collection_name=session_id,
-                    connection_string=os.getenv("POSTGRES_URL"),
-                    pre_delete_collection=False,
-                )
-        except MemoryError:
-            pass
-        
-        store_pdf_path(unique_id=unique_id, pdf_path=os.path.basename(pdf_path))
-        print(f"unique_id: {unique_id}, pdf_path: {pdf_path}")
-
-        await aioshutil.rmtree(pdf_parent_path)
-
-        return current_embeddings
 
 class FileEmbedder:
     def __init__(self, session_id, pre_delete_collection=True):
@@ -639,7 +503,6 @@ class FileEmbedder:
             'txt': {"func": file_processor.process_documents, "args": {"loader_cls": TextLoader}},
             'csv': {"func": file_processor.process_documents, "args": {"loader_cls": UnstructuredCSVLoader}},
             'png': {"func": file_processor.process_images_as_text, "args": {"loader_cls": TextLoader}},
-            'html': {"func": file_processor.process_website, "args": {"loader_cls": SeleniumURLLoader}},
             'code': {"func": file_processor.process_code, "args": {"suffixes": suffixes, "language_setting": language_setting}},
         }
         

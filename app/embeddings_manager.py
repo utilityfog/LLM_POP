@@ -330,15 +330,15 @@ def reset_embeddings_storage():
     
 ### Escalator
 # Session EMBEDDINGS_STORAGE
-PDF_PATH_DICT: {str : str} = {}
+FILE_PATH_DICT: {str : str} = {}
 
-def store_pdf_path(unique_id: str, pdf_path: str):
-    global PDF_PATH_DICT
-    PDF_PATH_DICT[unique_id] = pdf_path
+def store_pdf_path(unique_id: str, file_path: str):
+    global FILE_PATH_DICT
+    FILE_PATH_DICT[unique_id] = file_path
     
-def get_pdf_path(unique_id: str) -> str:
-    global PDF_PATH_DICT
-    return PDF_PATH_DICT.get(unique_id)
+def get_file_path(unique_id: str) -> str:
+    global FILE_PATH_DICT
+    return FILE_PATH_DICT.get(unique_id)
 
 # Session chrome driver
 CHROME_DRIVER_DICT = {}

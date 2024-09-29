@@ -125,10 +125,8 @@ const App: React.FC<AppProps> = ({ loginID }) => {
     setIsLoading(true); // Start loading
 
     let endpoint = '/rag/stream'; // Default endpoint
-    if (isMode === 'solve') {
-      endpoint = '/preprocess/stream';
-    } else if (isMode === 'research') {
-      endpoint = '/research/stream';
+    if (isMode === 'travel') {
+      endpoint = '/scrape/stream';
     }
 
     const messagePayload = {
@@ -141,6 +139,7 @@ const App: React.FC<AppProps> = ({ loginID }) => {
   
     const bodyPayload = {
       input: {
+        type: "extraction",
         question: message,
         file_embedding_keys: uploadedFileIds || {}, // Include the file_embedding_keys if they exist.
         session_id: sessionId || {},
@@ -383,9 +382,7 @@ const App: React.FC<AppProps> = ({ loginID }) => {
               className="bg-gray-800 text-white p-2 rounded"
             >
               <option value="chat">Chat Mode</option>
-              <option value="solve">Solve Jupyter Mode</option>
-              <option value="research">Research Mode</option>
-              <option value="search">Search Mode</option>
+              <option value="travel">Travel Mode</option>
             </select>
             <div className="toggle-container">
               <label>

@@ -93,7 +93,7 @@ from googleapiclient.errors import HttpError
 from importer.load_and_process import FileEmbedder
 from app.config import EMBEDDING_MODEL
 from app.embeddings_manager import get_embedding_from_manager, get_session_vector_store, reset_embeddings_storage, reset_session_vector_store, set_current_session_id, store_embedding, PGVectorWithEmbeddings, store_driver, store_window_handler, reset_driver, reset_window_handlers
-from app.rag_chain import final_chain, web_scraping_chain, random_base36_string, copy_driver_session
+from app.rag_chain import final_chain, extract_arguments_chain, random_base36_string
 
 app = FastAPI()
 
@@ -223,11 +223,7 @@ async def submit_url(url: str = Form(...)):
     return JSONResponse(content={"url": url})
 
 add_routes(app, final_chain, path="/rag") # Main
-add_routes(app, web_scraping_chain, path="/scrape")
-
-# add_routes(app, preprocess_chain, path="/preprocess")
-
-# add_routes(app, research_chain, path="/research")
+add_routes(app, extract_arguments_chain, path="/scrape")
 
 if __name__ == "__main__":
     import uvicorn
