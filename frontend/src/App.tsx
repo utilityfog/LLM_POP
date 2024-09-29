@@ -1,7 +1,7 @@
 import React, {useEffect, useState, useCallback} from 'react';
 import './App.css';
 import {fetchEventSource} from "@microsoft/fetch-event-source";
-import tar_logo from './tar.png';
+import tour_logo from './TourGPT.png';
 import { NotebookRender } from '@nteract/notebook-render';
 import { fromJS } from 'immutable';
 
@@ -291,9 +291,8 @@ const App: React.FC<AppProps> = ({ loginID }) => {
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col">
       <header className="bg-gray-800 text-white text-center p-4">
-        <img src={tar_logo} alt="Tar Logo" style={{width: '25%', height: 'auto'}} className="mx-auto" /> {/* Logo will be centered */}
-        <h1 style={{ fontFamily: "Origin", color: "#a2fcf5"}} className="text-6xl font-bold">Tar GPT</h1> {/* Increased font size */}
-        {/* <h3 style={{ fontFamily: "Origin", color: "#FFFFFF"}} className="text-2xl font-bold">A Research and Reading Assistant that Aids Dyslexic or Neurodivergent Individuals Intuitively Understand the Latest Cutting Edge Technologies Discussed in Recent Research Papers</h3> */}
+        <img src={tour_logo} alt="Tour Logo" style={{width: '25%', height: 'auto'}} className="mx-auto" /> {/* Logo will be centered */}
+        {/* <h1 style={{ fontFamily: "Origin", color: "#a2fcf5"}} className="text-6xl font-bold">Tar GPT</h1> Increased font size */}
       </header>
       <main className="flex-grow container mx-auto p-4 flex-col">
         <div className="flex-grow bg-gray-700 shadow overflow-hidden sm:rounded-lg">
@@ -366,16 +365,6 @@ const App: React.FC<AppProps> = ({ loginID }) => {
               </button>
             </form>
 
-            {/* Mode Selector */}
-            {/* <label className="switch">
-              <input
-                type="checkbox"
-                checked={isSolveMode}
-                onChange={() => setIsSolveMode(!isSolveMode)}
-              />
-              <span className="slider round"></span>
-            </label>
-            <span>{isSolveMode ? 'Solve Mode' : 'Chat Mode'}</span> */}
             <select
               value={isMode}
               onChange={(e) => setIsMode(e.target.value)}
@@ -404,7 +393,6 @@ const App: React.FC<AppProps> = ({ loginID }) => {
         All training data derived from public records
         <br/>
         <br/>
-        © 2024 Hydroxide Holdings
       </footer>
 
     </div>
