@@ -1,13 +1,13 @@
 # LLM_POP
 Application of RAG and LLM Fine Tuning in Pop Culture Analysis
 
-![Imgur](https://imgur.com/JCW44ne)
+![Imgur](https://i.imgur.com/JCW44ne.png)
 
 ## Inspiration
-![Imgur](https://imgur.com/DIrs7nR)
+![Imgur](https://i.imgur.com/DIrs7nR.png)
 
 ## What it does
-![Imgur](https://imgur.com/uRkWRlK)
+![Imgur](https://i.imgur.com/uRkWRlK.png)
 
 ## How we built it
-![Imgur](https://imgur.com/wnCKFh3)
+![Imgur](https://i.imgur.com/wnCKFh3.png)
