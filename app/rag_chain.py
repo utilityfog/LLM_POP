@@ -215,7 +215,7 @@ Return the extracted properties as arguments to a function call
 """
 
 LOCATION_GUIDE_TEMPLATE = """
-Provide a friendly guide of locations a user would like to visit based on the given location reviews corresponding to the prompt, given the following:
+Given the provided context of retrieved top 20 relevant attractions, provide a friendly guide of locations a user would like to visit based on the given location reviews corresponding to the prompt, given the following:
 
 Detailed Prompt: 
 {prompt}
@@ -424,6 +424,8 @@ def get_prompt_data(prompt_id):
     return prompt_embedding, location_list
 
 def retrieve_top_10_attractions(session_id: str, user_prompt_embeddings: List[List[float]], preprocessing_results):
+    print(f"preprocessing results: {preprocessing_results}")
+    
     # Convert the list into a dictionary, preprocessing_results must never be empty
     jsonname_to_location_dict = {}
     for item in preprocessing_results:
@@ -450,16 +452,19 @@ def retrieve_top_10_attractions(session_id: str, user_prompt_embeddings: List[Li
             break
         
         # Perform similarity search
-        results = session_vector_store.similarity_search_with_score_by_vector(user_prompt_embedding, k=3)
+        results = session_vector_store.similarity_search_with_score_by_vector(user_prompt_embedding, k=20)
         print(f"retrieved results: {results}")
         if results:
             for doc, embedding, _ in results:
                 try:
                     # print(f"doc: {doc}")
                     path = doc.metadata['source']
+                    print(f"path: {path}")
                     basename = os.path.basename(path) # profile pdf basename
+                    print(f"basename: {basename}")
                     # Fetch profile object from dict using basename
                     location = jsonname_to_location_dict.get(basename)
+                    print(f"retrieve top 10 location: {location}")
                     # Fetch id of profile
                     id = location['id']
                     
@@ -494,59 +499,6 @@ def retrieve_top_10_attractions(session_id: str, user_prompt_embeddings: List[Li
     return unique_attractions, list(unique_attractions_embeddings.values())
 
 PROMPTS_DATA_FILE = "./database/prompts.json"
-
-executor = ThreadPoolExecutor(max_workers=16)
-# async def start_extracting(pipeline_data):
-#     print("Start Extracting Locations")
-#     prompt_id = pipeline_data['id']
-#     type = pipeline_data['type']
-#     prompt_embedding, raw_location_list = get_prompt_data(prompt_id)
-    
-#     initial_inputs = [
-#         {
-#             "instruction": "Extract relevant location properties given your context",
-#             "raw_location_object": location.values()[0],
-#             "id": location.keys()[0],
-#             "type": type,
-#             "session_id": prompt_id
-#         }
-#         for location in raw_location_list[1::2]
-#     ]
-    
-#     async def create_task(input_data):
-#         return await location_generation_chain.ainvoke(input_data)
-    
-#     def chunk_list(lst, n):
-#         for i in range(0, len(lst), n):
-#             yield lst[i:i + n]
-    
-#     num_chunks = 1
-#     chunk_size = (len(initial_inputs) + num_chunks - 1) // num_chunks
-#     input_chunks = list(chunk_list(initial_inputs, chunk_size))
-    
-#     async def event_generator():
-#         preprocessing_results = []
-#         retrieved_attractions = []
-        
-#         try:
-#             for input_chunk in input_chunks:
-#                 tasks = [create_task(input_data) for input_data in input_chunk]                
-#                 loop = asyncio.get_event_loop()
-#                 chunk_results = await loop.run_in_executor(executor, lambda: asyncio.run(asyncio.gather(*tasks)))
-#                 preprocessing_results.extend(chunk_results)
-                
-#             retrieved_attractions, retrieved_attractions_embeddings = retrieve_top_20_attractions(session_id=prompt_id, user_prompt_embeddings=prompt_embedding, preprocessing_results=preprocessing_results)
-#             unique_attractions_dict = {list(attraction.values())[0]: attraction for attraction in retrieved_attractions}
-#             attraction_data_file = f"./database/attractions_{prompt_id}.json"
-#             with open(attraction_data_file, "w", encoding="utf-8") as f:
-#                 json.dump(unique_attractions_dict, f)
-            
-#             yield json.dumps({"event": "data", "id": prompt_id, "relevant_attractions": retrieved_attractions, "relevant_attractions_embeddings": retrieved_attractions_embeddings})
-            
-#         except Exception as e:
-#             raise f"An error occured while processing prompt {prompt_id}: {e}"
-
-#     return EventSourceResponse(event_generator(), media_type="text/event-stream") # media_type="text/event-stream"
 
 async def start_extracting(pipeline_data):
     print(f"Start Extracting Locations: {pipeline_data}")
@@ -592,19 +544,37 @@ async def start_extracting(pipeline_data):
         for input_chunk in input_chunks:
             tasks = [create_task(input_data) for input_data in input_chunk]                
             chunk_results = await asyncio.gather(*tasks)
+            print(f"chunk results: {chunk_results}")
             preprocessing_results.extend(chunk_results)
-            time.sleep(3)
+            time.sleep(2)
     except Exception as e:
         raise f"An error occured while processing prompt {prompt_id}: {e}"
 
     # profile preprocessing results
-    print(f"preprocessing results: {preprocessing_results}")
+    print(f"start_networking preprocessing results: {preprocessing_results}")
     
     retrieved_attractions, retrieved_attractions_embeddings = retrieve_top_10_attractions(session_id=prompt_id, user_prompt_embeddings=prompt_embedding, preprocessing_results=preprocessing_results)
     unique_attractions_dict = {list(attraction.values())[0]: attraction for attraction in retrieved_attractions}
     attraction_data_file = f"./database/attractions_{prompt_id}.json"
     with open(attraction_data_file, "w", encoding="utf-8") as f:
         json.dump(unique_attractions_dict, f)
+        
+    # Specify the file path and name
+    # attraction_data_file = f"./uploaded_files/attractions_{prompt_id}.txt"
+
+    # # Save the dictionary to a txt file
+    # with open(attraction_data_file, "w", encoding="utf-8") as f:
+    #     json.dump(unique_attractions_dict, f, ensure_ascii=False, indent=4)
+        
+    # file_embedder = FileEmbedder(prompt_id, pre_delete_collection=False)
+    
+    # text_splitter = SemanticChunker(embeddings=embedding_method)
+    
+    # glob_pattern = "**/*.txt"
+        
+    # upload_folder = Path("./uploaded_files")
+    
+    # file_embedding = await file_embedder.process_and_embed_file(directory_path=upload_folder, file_path=attraction_data_file, unique_id=None, url=None, embeddings=embedding_method, glob_pattern=glob_pattern, text_splitter=text_splitter)
     
     return {"embeddings_list": retrieved_attractions_embeddings, "session_vector_store": get_session_vector_store(prompt_id, False)}
     
@@ -636,8 +606,8 @@ async def embed_content(inputs): # Embeds either user prompt or saved txt object
     elif type == "generation":
         id = inputs['id']
         raw_location_object = inputs['raw_location_object']
-        print(f"location session_id: {id}")
-        file_embedder = FileEmbedder(id, pre_delete_collection=False)
+        print(f"location session_id: {id}, raw_location_object: {raw_location_object}")
+        file_embedder = FileEmbedder(inputs['session_id'], pre_delete_collection=False)
     
     ### Initialize text splitter
     text_splitter = SemanticChunker(embeddings=embedding_method)
@@ -787,6 +757,7 @@ def call_populated_function(wrapped_response):
                 
                 return {additional_data['id'] : tourpedia_api_arguments}
             elif tool_call['function']['name'] == "extract_relevant_location_properties":
+                print("Extraction function call by LLM!")
                 extractor = Extractor()
                 arguments = json.loads(tool_call['function']['arguments'])
                 
@@ -801,6 +772,8 @@ def call_populated_function(wrapped_response):
                     id=additional_data['id'], name=name, address=address, url=url, pros=pros,  cons=cons, rating=rating
                 )
                 additional_data['location_with_properties'] = location_with_properties
+                
+                print(f"location with properties: {location_with_properties}")
                 
                 return location_with_properties
         return wrapped_response
@@ -829,7 +802,7 @@ def getIDs(args):
         pass
     else:
         print("Invalid category")
-        exit()
+        #
 
 
     url = "http://tour-pedia.org/api/getPlaces?category="+cat+"&location="+city
@@ -866,52 +839,6 @@ def getIDs(args):
     return idList
 
 executor = ThreadPoolExecutor(max_workers=8)  # Adjust max_workers as needed
-# def fetch_reviews_for_id(id):
-#     # Dictionary to store results for the specific ID
-#     locations_raw_object_dict = {}
-#     reviews = []
-   
-#     # Fetch reviews
-#     url = f"http://tour-pedia.org/api/getReviewsByPlaceId?language=en&placeId={str(id)}"
-#     try:
-#         response = requests.get(url, timeout=10)
-#         response.raise_for_status()
-#         jData = json.loads(response.content)
-#         reviews = [review['text'] for review in jData if 'text' in review]  # Extract reviews
-
-
-#     except requests.exceptions.RequestException as e:
-#         print(f"Error fetching reviews for {id}: {e}")
-#         return {id: {"error": str(e)}}
-   
-#     # if the reviews list has elements, if not, that id is not added to the dict
-#     if len(reviews) != 0:
-#         # store reviews
-#         locations_raw_object_dict[id] = [reviews]
-       
-#         # Fetch place details
-#         placeName = ""
-#         placeAddy = ""
-#         details_url = f"http://tour-pedia.org/api/getPlaceDetails?id={str(id)}"
-#         try:
-#             response = requests.get(details_url, timeout=10)
-#             response.raise_for_status()
-#             jData = json.loads(response.content)
-#             placeName = jData.get("name", "")
-#             placeAddy = jData.get("address", "")
-
-
-#         except requests.exceptions.RequestException as e:
-#             print(f"Error fetching details for {id}: {e}")
-#             return {id: {"error": str(e)}}
-       
-#         # Store place details
-#         locations_raw_object_dict[id].append(placeName)
-#         locations_raw_object_dict[id].append(placeAddy)
-#         locations_raw_object_dict[id].append(details_url)
-   
-#     return locations_raw_object_dict
-
 def fetch_reviews_for_id(id):
     # Dictionary to store results for the specific ID
     locations_raw_object_dict = {}
@@ -969,87 +896,6 @@ def getReviews(idList):
     
     return locations_raw_object_dict
 
-# def getReviews(idList):
-#     print("Get Reviews Called")
-#     locations_raw_object_dict = {}
-#     reviews = []
-
-#     for id in idList:
-#         url = f"http://tour-pedia.org/api/getReviewsByPlaceId?language=en&placeId={str(id)}"
-#         myResponse = None
-#         try:
-#             # Send a GET request with a specified timeout (e.g., 10 seconds)
-#             myResponse = requests.get(url, timeout=10)
-#             # Check if the response was successful (status code 200)
-#             myResponse.raise_for_status()
-#         except requests.exceptions.HTTPError as http_err:
-#             print(f"HTTP error occurred: {http_err}")
-#         except requests.exceptions.ConnectionError as conn_err:
-#             print(f"Connection error occurred: {conn_err}")
-#         except requests.exceptions.Timeout as timeout_err:
-#             print(f"Timeout error occurred: {timeout_err}")
-#         except requests.exceptions.RequestException as req_err:
-#             print(f"An error occurred: {req_err}")
-#         # For successful API call, response code will be 200 (OK)
-#         if(myResponse.ok):
-#             # Loading the response data into a dict variable
-#             # json.loads takes in only binary or string variables so using content to fetch binary content
-#             # Loads (Load String) takes a Json file and converts into python data structure (dict or list, depending on JSON)
-#             jData = json.loads(myResponse.content)
-#             # initialize the list of review strings for the id to be null
-#             locations_raw_object_dict[id] = []
-#             reviews = []
-#             # Iterate directly through the list of dictionaries
-#             for review in jData:
-#                 # Iterate through the key-value pairs in each dictionary
-#                 for key, value in review.items():
-#                     if key == "text":
-#                         # add the text to the dictionary attacted to the placeID
-#                         reviews.append(value)
-#             # add all the String reviews as a element in the value attached to the placeID key
-#             locations_raw_object_dict[id].append(reviews)
-#             # place attributes to add to the dict
-#             placeName = ""
-#             placeAddy = ""
-#             # get the rest of the data associated with the location and add it to the list
-#             url = f"http://tour-pedia.org/api/getPlaceDetails?id={str(id)}"
-#             myResponse = None
-#             try:
-#                 # Send a GET request with a specified timeout (e.g., 10 seconds)
-#                 myResponse = requests.get(url, timeout=10)
-#                 # Check if the response was successful (status code 200)
-#                 myResponse.raise_for_status()
-#             except requests.exceptions.HTTPError as http_err:
-#                 print(f"HTTP error occurred: {http_err}")
-#             except requests.exceptions.ConnectionError as conn_err:
-#                 print(f"Connection error occurred: {conn_err}")
-#             except requests.exceptions.Timeout as timeout_err:
-#                 print(f"Timeout error occurred: {timeout_err}")
-#             except requests.exceptions.RequestException as req_err:
-#                 print(f"An error occurred: {req_err}")
-#             if(myResponse.ok):
-#                 jData = json.loads(myResponse.content)
-#                 # Iterate through the key-value pairs in each dictionary
-#                 for key, value in jData.items():
-#                     if key == "name":
-#                         placeName = value
-#                     elif key == "address":
-#                         placeAddy = value
-#             else:
-#                 # If response code is not ok (200), print the resulting http error code with description
-#                 myResponse.raise_for_status()
-#             locations_raw_object_dict[id].append(placeName)
-#             locations_raw_object_dict[id].append(placeAddy)
-#             locations_raw_object_dict[id].append(url)
-            
-#             print(f"response: {myResponse}")
-
-#         else:
-#             # If response code is not ok (200), print the resulting http error code with description
-#             myResponse.raise_for_status()
-#     # { placeID: [[review1,review2], placeName, placeAddress, placeURL], placeID2:[...]...}
-#     return locations_raw_object_dict
-
 async def return_raw_location_list(input):
     print("Return raw location")
     
@@ -1093,23 +939,6 @@ async def return_raw_location_list(input):
 # Function to run async task from a non-async context
 def run_return_raw_location_list(input):
     return asyncio.run(return_raw_location_list(input))
-    
-# def return_raw_location_list(input):
-#     print("Return raw location ")
-#     id = list(input.keys())[0]
-#     arguments = list(input.values())[0]
-#     print(f"id: {id}")
-#     print(f"arguments: {arguments}")
-#     # Douglass's Function
-#     id_list = getIDs(arguments)
-#     location_raw_object_list = getReviews(id_list) # dict of each key as location_id and value as raw location object
-#     print("Get Reviews Success")
-#     # Save raw_locations_dict as json for future fetching with prompt_id
-#     locations_for_prompt_file = f"./database/locations_{id}.json"
-#     raw_locations_dict = {id: location_raw_object_list}
-#     with open(locations_for_prompt_file, "w", encoding="utf-8") as f:
-#         json.dump(raw_locations_dict, f)
-#     return location_raw_object_list
 
 # Correctly setting up partial functions
 custom_question_getter = partial(get_question)
@@ -1164,6 +993,7 @@ location_generation_chain = (
         context=(return_content_embeddings | return_converted_docs), # turn review objects into a List[List[Document]]
         instruction=itemgetter("instruction"),
         id=itemgetter("id"),
+        sessiond_id=itemgetter("session_id"),
         type=itemgetter("type"),
         raw_location_object=itemgetter("raw_location_object") # review == dict
     ) |

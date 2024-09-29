@@ -95,7 +95,7 @@ class Extractor:
                             "description": "Average rating given by visitors for the location"
                         }
                     },
-                    "required": ["name", "address", "pros", "cons", "rating"]
+                    "required": ["name", "address", "url", "pros", "cons", "rating"]
                 }
             }
         }
